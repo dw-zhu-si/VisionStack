@@ -1,0 +1,207 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:VisionStack.Windows.ViewModels"
+        x:Class="VisionStack.Windows.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        mc:Ignorable="d"
+        d:DesignWidth="1440"
+        d:DesignHeight="900"
+        Width="1360"
+        Height="840"
+        MinWidth="1080"
+        MinHeight="700"
+        Icon="/Assets/AppIcon.png"
+        Title="映栈 VisionStack · Windows Beta">
+  <Grid RowDefinitions="94,*" ColumnDefinitions="238,*">
+    <Border Grid.RowSpan="2" Background="#211F1C">
+      <Grid RowDefinitions="Auto,*,Auto" Margin="22,26">
+        <StackPanel Spacing="3">
+          <TextBlock Text="映栈" FontSize="30" FontWeight="Bold" Foreground="#FFFDF8" />
+          <TextBlock Text="VISIONSTACK" FontSize="12" FontWeight="SemiBold" LetterSpacing="2.2" Foreground="#D6CEC0" />
+          <Border Margin="0,14,0,0" Padding="10,5" Background="#473F35" CornerRadius="12" HorizontalAlignment="Left">
+            <TextBlock Text="WINDOWS 0.9.0 BETA" FontSize="10" FontWeight="Bold" Foreground="#FFB19F" />
+          </Border>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Margin="0,42,0,0" Spacing="8">
+          <TextBlock Text="创作模式" Margin="8,0,0,8" FontSize="11" FontWeight="Bold" Foreground="#8E877D" />
+          <Border Padding="13,12" Background="#34312D" CornerRadius="10">
+            <StackPanel>
+              <TextBlock Text="对话" FontSize="15" FontWeight="SemiBold" Foreground="#C9C2B8" />
+              <TextBlock Text="后续阶段" FontSize="11" Foreground="#8E877D" />
+            </StackPanel>
+          </Border>
+          <Border Padding="13,12" Background="#34312D" CornerRadius="10">
+            <StackPanel>
+              <TextBlock Text="生图" FontSize="15" FontWeight="SemiBold" Foreground="#C9C2B8" />
+              <TextBlock Text="后续阶段" FontSize="11" Foreground="#8E877D" />
+            </StackPanel>
+          </Border>
+          <Border Padding="13,12" Background="#34312D" CornerRadius="10">
+            <StackPanel>
+              <TextBlock Text="视频" FontSize="15" FontWeight="SemiBold" Foreground="#C9C2B8" />
+              <TextBlock Text="后续阶段" FontSize="11" Foreground="#8E877D" />
+            </StackPanel>
+          </Border>
+          <Border Padding="13,12" Background="#E83A20" CornerRadius="10">
+            <StackPanel>
+              <TextBlock Text="模型与厂商" FontSize="15" FontWeight="SemiBold" Foreground="#FFFFFF" />
+              <TextBlock Text="第一阶段已启用" FontSize="11" Foreground="#FFE6DF" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Spacing="5">
+          <TextBlock Text="核心 Beta" FontWeight="SemiBold" Foreground="#FFFDF8" />
+          <TextBlock Text="先完成安全连接、项目与任务核心，再逐步对齐 macOS。" TextWrapping="Wrap" FontSize="11" LineHeight="17" Foreground="#A9A198" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Border Grid.Column="1" Background="#FAF5E9" BorderBrush="#DDD4C5" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="*,Auto" Margin="30,0">
+        <StackPanel VerticalAlignment="Center" Spacing="4">
+          <TextBlock Text="模型与厂商" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock Text="直连任意厂商，也可继续使用并推荐 ModelHub。" FontSize="12" Foreground="#655F56" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+          <Border Padding="12,7" Background="#E8E8D9" CornerRadius="16">
+            <TextBlock Text="● 本地配置" FontSize="11" FontWeight="SemiBold" Foreground="#4F6D45" />
+          </Border>
+          <Button Classes="secondary" Content="恢复 ModelHub 默认值" Command="{Binding UseModelHubCommand}" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <ScrollViewer Grid.Row="1" Grid.Column="1" HorizontalScrollBarVisibility="Disabled">
+      <Grid ColumnDefinitions="*,430" Margin="30,28,30,34">
+        <StackPanel Margin="0,0,24,0" Spacing="20">
+          <StackPanel Spacing="8">
+            <TextBlock Text="先把模型入口接稳，" FontSize="34" FontWeight="Bold" />
+            <TextBlock Text="再让创作流程落地。" FontSize="34" FontWeight="Bold" />
+            <TextBlock Text="本阶段不会自动联网、不会自动计费，也不会把供应商密钥写入普通配置或日志。"
+                       Margin="0,6,0,0" FontSize="13" Foreground="#655F56" TextWrapping="Wrap" />
+          </StackPanel>
+
+          <Grid ColumnDefinitions="*,*,*">
+            <Border Margin="0,0,10,0" Padding="16" Background="#FFFDF8" BorderBrush="#DDD4C5" BorderThickness="1" CornerRadius="12">
+              <StackPanel Spacing="6">
+                <TextBlock Text="01" FontSize="11" FontWeight="Bold" Foreground="#E83A20" />
+                <TextBlock Text="安全校验" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="区分回环网关与公网厂商，拦截私网及元数据地址。" FontSize="11" Foreground="#655F56" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="1" Margin="0,0,10,0" Padding="16" Background="#FFFDF8" BorderBrush="#DDD4C5" BorderThickness="1" CornerRadius="12">
+              <StackPanel Spacing="6">
+                <TextBlock Text="02" FontSize="11" FontWeight="Bold" Foreground="#E83A20" />
+                <TextBlock Text="密钥隔离" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="Windows 使用当前用户 DPAPI；元数据文件不包含密钥。" FontSize="11" Foreground="#655F56" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="2" Padding="16" Background="#FFFDF8" BorderBrush="#DDD4C5" BorderThickness="1" CornerRadius="12">
+              <StackPanel Spacing="6">
+                <TextBlock Text="03" FontSize="11" FontWeight="Bold" Foreground="#E83A20" />
+                <TextBlock Text="厂商开放" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="不设厂商白名单；支持兼容 API、Anthropic、Gemini 与 ModelHub。" FontSize="11" Foreground="#655F56" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </Grid>
+
+          <StackPanel Spacing="10">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="已配置入口" FontSize="20" FontWeight="SemiBold" />
+              <TextBlock Grid.Column="1" Text="{Binding Providers.Count, StringFormat='{}{0} 个'}" VerticalAlignment="Center" Foreground="#655F56" />
+            </Grid>
+            <ItemsControl ItemsSource="{Binding Providers}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ProviderCard">
+                  <Border Margin="0,0,0,9" Padding="16" Background="#FFFDF8" BorderBrush="#DDD4C5" BorderThickness="1" CornerRadius="12">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Spacing="5">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="{Binding DisplayName}" FontSize="15" FontWeight="SemiBold" />
+                          <Border IsVisible="{Binding IsSelected}" Padding="8,3" Background="#E8E8D9" CornerRadius="10">
+                            <TextBlock Text="当前" FontSize="10" Foreground="#4F6D45" />
+                          </Border>
+                        </StackPanel>
+                        <TextBlock Text="{Binding BaseUrl}" FontSize="11" Foreground="#655F56" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" HorizontalAlignment="Right" Spacing="4">
+                        <TextBlock Text="{Binding KindTitle}" HorizontalAlignment="Right" FontSize="11" FontWeight="SemiBold" Foreground="#E83A20" />
+                        <TextBlock Text="{Binding ModelsSummary}" HorizontalAlignment="Right" FontSize="10" Foreground="#655F56" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6" Margin="0,5,0,0">
+                          <Button Classes="secondary" Content="设为当前" MinHeight="30" Padding="9,4"
+                                  IsVisible="{Binding !IsSelected}" Command="{Binding SelectCommand}" CommandParameter="{Binding Id}" />
+                          <Button Classes="secondary" Content="删除" MinHeight="30" Padding="9,4"
+                                  IsVisible="{Binding CanDelete}" Command="{Binding DeleteCommand}" CommandParameter="{Binding Id}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+
+          <Border Padding="16" Background="#EEE7D9" CornerRadius="12">
+            <StackPanel Spacing="5">
+              <TextBlock Text="数据边界" FontSize="13" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding CredentialProtectionLabel}" FontSize="11" Foreground="#4F6D45" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding DataRootLabel}" FontSize="10" Foreground="#655F56" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <Border Grid.Column="1" Padding="22" Background="#FFFDF8" BorderBrush="#D9D0C1" BorderThickness="1" CornerRadius="16" VerticalAlignment="Top">
+          <StackPanel Spacing="13">
+            <StackPanel Spacing="4">
+              <TextBlock Text="添加模型厂商" FontSize="21" FontWeight="SemiBold" />
+              <TextBlock Text="保存只处理本机配置；连接测试与模型调用将单独征得确认。" FontSize="11" Foreground="#655F56" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <TextBlock Text="厂商类型" FontSize="11" FontWeight="SemiBold" />
+            <ComboBox ItemsSource="{Binding ProviderKinds}" SelectedItem="{Binding SelectedProviderKind}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:ProviderKindOption">
+                  <TextBlock Text="{Binding Title}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+
+            <TextBlock Text="显示名称" FontSize="11" FontWeight="SemiBold" />
+            <TextBox Text="{Binding DisplayName}" PlaceholderText="例如：我的图片模型厂商" />
+
+            <TextBlock Text="API 基址" FontSize="11" FontWeight="SemiBold" />
+            <TextBox Text="{Binding BaseUrl}" PlaceholderText="https://api.vendor.example/v1" />
+
+            <TextBlock Text="API 密钥（可留空）" FontSize="11" FontWeight="SemiBold" />
+            <TextBox Text="{Binding Secret}" PasswordChar="●" RevealPassword="False" PlaceholderText="仅写入 Windows DPAPI" />
+
+            <TextBlock Text="手动模型 ID（可选）" FontSize="11" FontWeight="SemiBold" />
+            <TextBox Text="{Binding ManualModelIds}" AcceptsReturn="True" MinHeight="78" TextWrapping="Wrap" PlaceholderText="每行或逗号分隔；连接目录不完整时使用" />
+
+            <Border IsVisible="{Binding HasStatus}" Padding="12" Background="#F2ECE1" CornerRadius="9">
+              <Grid ColumnDefinitions="Auto,*">
+                <Grid Margin="0,0,8,0">
+                  <TextBlock Text="●" IsVisible="{Binding StatusSucceeded}" Foreground="#4F6D45" />
+                  <TextBlock Text="●" IsVisible="{Binding StatusIsError}" Foreground="#C53D25" />
+                </Grid>
+                <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" FontSize="11" Foreground="#4A443C" TextWrapping="Wrap" />
+              </Grid>
+            </Border>
+
+            <Grid ColumnDefinitions="*,*">
+              <Button Margin="0,0,6,0" Classes="secondary" Content="仅做本地校验" Command="{Binding ValidateCommand}" />
+              <Button Grid.Column="1" Margin="6,0,0,0" Classes="primary" Content="校验并保存" Command="{Binding SaveCommand}" IsEnabled="{Binding !IsBusy}" />
+            </Grid>
+
+            <TextBlock Text="Beta 限制：目前尚未实现真实连接测试、模型目录同步、创作调用和自动更新。"
+                       FontSize="10" Foreground="#8D4A3A" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+      </Grid>
+    </ScrollViewer>
+  </Grid>
+</Window>

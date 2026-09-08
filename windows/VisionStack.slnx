@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="VisionStack.Core/VisionStack.Core.csproj" />
+  <Project Path="VisionStack.Windows/VisionStack.Windows.csproj" />
+  <Project Path="VisionStack.Windows.Tests/VisionStack.Windows.Tests.csproj" />
+</Solution>

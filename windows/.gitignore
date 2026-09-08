@@ -1,0 +1,6 @@
+**/bin/
+**/obj/
+artifacts/
+packaging/output/
+*.user
+*.suo

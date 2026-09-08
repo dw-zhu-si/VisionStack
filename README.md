@@ -1,6 +1,6 @@
 # 映栈 VisionStack
 
-**把灵感从对话推进到图片、分镜和视频。**
+**把灵感从对话推进到图片、分镜和视频。MIT 开源。**
 
 映栈是为设计师与内容创作者打造的原生 macOS AI 创作工作台。把对话、参考图、生成任务、素材和版本放进同一个项目，从整理创作方向到完成本机视频草剪，让每一步都有上下文可循。
 
@@ -90,8 +90,25 @@ Windows 客户端已建立模型厂商配置、密钥隔离存储和 x64 / ARM64
 
 ## 支持与仓库用途
 
-本仓库是映栈的**官方产品介绍与发行包仓库**，不包含应用源码。macOS 正式制品按 Developer ID 签名、Apple 公证、Staple 与 Gatekeeper 流程验证后发布。
+本仓库包含映栈的 **MIT 开源应用源码、产品介绍与官方发行包**。macOS 源码涵盖上述创作功能；`windows/` 是仍在开发中的 Windows 原型。macOS 正式制品按 Developer ID 签名、Apple 公证、Staple 与 Gatekeeper 流程验证后发布。
 
 使用问题请访问[技术支持](https://pm.jcm99.com/apple/visionstack/support.html)；安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。请使用官方 Release 及对应校验文件，避免第三方重打包副本。第三方组件说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-Copyright © 2026 野路子工作室。保留所有权利。
+Copyright © 2026 野路子工作室。自有代码与文档按 [MIT](LICENSE) 授权；第三方资源保留各自许可。
+
+## 从源码构建
+
+源码要求 macOS 14+、支持 Swift 6.2 或更新版本的 Xcode 工具链。AppKit / SwiftUI 构建需要 macOS；官方安装包当前仅验证 Apple Silicon。
+
+```sh
+git clone https://github.com/dw-zhu-si/VisionStack.git
+cd VisionStack
+swift test
+./scripts/build_macos.sh
+```
+
+构建脚本生成 `dist/community/build.*/VisionStack-community-*.zip`，包含“映栈社区版.app”，无需 Apple 开发者账号或发布证书。社区版使用独立的应用标识、数据目录和凭证服务名称，并默认要求第三方 AI 请求同意。它是本机 ad-hoc 签名构建，未经 Apple 公证，不等同于上方已发布的官方安装包；本轮源码包含社区构建适配，不能据此声称与 0.8.1 官方二进制逐字节一致。
+
+Windows 编译说明见 [windows/README.md](windows/README.md)。开源 Windows 代码并不代表 Windows 正式版已经完成。
+
+详见[开发说明](docs/DEVELOPMENT.md)、[贡献指南](CONTRIBUTING.md)与[第三方声明](THIRD_PARTY_NOTICES.md)。

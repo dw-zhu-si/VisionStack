@@ -1,0 +1,40 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="VisionStack.Windows.App"
+             RequestedThemeVariant="Light">
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="FontFamily" Value="Inter, Microsoft YaHei UI, Segoe UI" />
+      <Setter Property="Background" Value="#F7F0E1" />
+      <Setter Property="Foreground" Value="#201D19" />
+    </Style>
+    <Style Selector="TextBlock">
+      <Setter Property="Foreground" Value="#201D19" />
+    </Style>
+    <Style Selector="TextBox, ComboBox">
+      <Setter Property="MinHeight" Value="42" />
+      <Setter Property="Background" Value="#FFFDF8" />
+      <Setter Property="Foreground" Value="#201D19" />
+      <Setter Property="BorderBrush" Value="#D9D0C1" />
+      <Setter Property="CornerRadius" Value="9" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="Padding" Value="18,10" />
+      <Setter Property="Background" Value="#E83A20" />
+      <Setter Property="Foreground" Value="#FFFFFF" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.secondary">
+      <Setter Property="MinHeight" Value="40" />
+      <Setter Property="Padding" Value="14,8" />
+      <Setter Property="Background" Value="#EEE7D9" />
+      <Setter Property="Foreground" Value="#201D19" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="9" />
+    </Style>
+  </Application.Styles>
+</Application>
