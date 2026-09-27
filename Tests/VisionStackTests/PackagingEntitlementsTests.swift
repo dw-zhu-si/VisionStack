@@ -48,14 +48,37 @@ final class PackagingEntitlementsTests: XCTestCase {
         XCTAssertFalse(script.contains("Set :com.apple.developer.team-identifier"))
     }
 
-    func testAppStorePackagingRequiresEmbedsAndVerifiesAProvisioningProfile() throws {
-        let scriptURL = packageRoot.appending(path: "scripts/package_macos_app.sh")
-        let script = try String(contentsOf: scriptURL, encoding: .utf8)
+    func testCommunityPackagingRejectsOfficialChannelsAndDelegatesLocalBuild() throws {
+        let fixture = FileManager.default.temporaryDirectory
+            .appending(path: "visionstack-packaging-test-\(UUID().uuidString)")
+        let scripts = fixture.appending(path: "scripts")
+        try FileManager.default.createDirectory(at: scripts, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let wrapper = scripts.appending(path: "package_macos_app.sh")
+        try FileManager.default.copyItem(
+            at: packageRoot.appending(path: "scripts/package_macos_app.sh"), to: wrapper
+        )
+        let stub = scripts.appending(path: "build_macos.sh")
+        try "#!/bin/sh\nprintf 'community-build-delegated'\n".write(to: stub, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
 
-        XCTAssertTrue(script.contains("APP_STORE_PROVISIONING_PROFILE"))
-        XCTAssertTrue(script.contains("Contents/embedded.provisionprofile"))
-        XCTAssertTrue(script.contains("verify_app_store_profile"))
-        XCTAssertTrue(script.contains("EXPECTED_APP_IDENTIFIER"))
+        for mode in ["github", "developer-id", "distribution", "app-store", "unknown", "local"] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = [wrapper.path]
+            var environment = ProcessInfo.processInfo.environment
+            environment["RELEASE_MODE"] = mode
+            process.environment = environment
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            XCTAssertEqual(process.terminationStatus, mode == "local" ? 0 : 64, mode)
+            XCTAssertEqual(text, mode == "local" ? "community-build-delegated" : "", mode)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: fixture.path), ["scripts"], mode)
+        }
     }
 
     private var packageRoot: URL {
