@@ -1773,11 +1773,16 @@ final class AppStore: ObservableObject {
     }
 
     func referenceUsageCount(_ id: UUID) -> Int {
-        imageJobs.filter { $0.effectiveImageReferences.contains(where: { $0.assetID == id }) }.count
-            + videoJobs.filter { $0.referenceAssetID == id }.count
-            + storyboardShots.filter { $0.referenceAssetID == id }.count
-            + imageDrafts.values.filter { [$0.referenceAssetID, $0.identityReferenceAssetID, $0.photographyReferenceAssetID].contains(id) }.count
-            + videoDrafts.values.filter { $0.referenceAssetID == id }.count
+        let imageJobCount: Int = imageJobs.filter {
+            $0.effectiveImageReferences.contains(where: { $0.assetID == id })
+        }.count
+        let videoJobCount: Int = videoJobs.filter { $0.referenceAssetID == id }.count
+        let storyboardCount: Int = storyboardShots.filter { $0.referenceAssetID == id }.count
+        let imageDraftCount: Int = imageDrafts.values.filter {
+            [$0.referenceAssetID, $0.identityReferenceAssetID, $0.photographyReferenceAssetID].contains(id)
+        }.count
+        let videoDraftCount: Int = videoDrafts.values.filter { $0.referenceAssetID == id }.count
+        return imageJobCount + videoJobCount + storyboardCount + imageDraftCount + videoDraftCount
     }
 
     func runMediaHealthCheck() async {
