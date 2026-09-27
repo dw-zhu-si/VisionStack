@@ -2,14 +2,18 @@ import SwiftUI
 
 struct ChatView: View {
     @EnvironmentObject private var store: AppStore
+    @AppStorage("VisionStack.showChatAgentPanel") private var showingAgentPanel = true
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) { toolbar; messages; composer }
-            contextRail.frame(width: 260)
+            if showingAgentPanel { contextRail.frame(width: 260) }
         }
     }
     private var toolbar: some View {
         HStack(spacing: 12) {
+            Button { showingAgentPanel.toggle() } label: { Image(systemName: "sidebar.right") }
+                .help(showingAgentPanel ? "收起 Agent 面板" : "展开 Agent 面板")
+                .accessibilityLabel(showingAgentPanel ? "收起 Agent 面板" : "展开 Agent 面板")
             if store.availableModels.isEmpty { Text("当前连接没有可用模型").font(.vsBody(11)).foregroundStyle(VSColor.vermilion) }
             else {
                 ModelSelectionControl(operation: .chat, selection: $store.preferredChatModel)

@@ -12,39 +12,28 @@ struct VersionReview: Identifiable, Codable, Hashable, Sendable {
 }
 
 struct ProjectCostSummary: Equatable, Sendable {
+    /// Only a single known currency can have a combined amount. No currency conversion is inferred.
     var currency: String
-    var knownTotal: Decimal
+    var knownTotal: Decimal?
     var knownCount: Int
     var unknownCount: Int
     var providerReportedCount: Int
+    var totalsByCurrency: [CurrencyCostTotal]
 }
 
 enum ProjectCostLedger {
     static func summary(for jobs: [GenerationJob]) -> ProjectCostSummary {
-        var total = Decimal.zero
-        var knownCount = 0
-        var unknownCount = 0
-        var providerReportedCount = 0
-        var currency = "CNY"
-
-        for job in jobs {
-            guard let cost = job.cost,
-                  let amount = cost.actualAmount ?? cost.estimatedAmount else {
-                unknownCount += 1
-                continue
-            }
-            total += amount
-            knownCount += 1
-            currency = cost.currency
-            if cost.providerReported { providerReportedCount += 1 }
-        }
-
+        let costs = jobs.map(\.cost)
+        let totals = CostPresentation.totals(costs)
+        let known = costs.compactMap { $0 }.filter { $0.actualAmount != nil || $0.estimatedAmount != nil }
+        let only = totals.count == 1 ? totals.first : nil
         return ProjectCostSummary(
-            currency: currency,
-            knownTotal: total,
-            knownCount: knownCount,
-            unknownCount: unknownCount,
-            providerReportedCount: providerReportedCount
+            currency: only?.currency ?? (totals.isEmpty ? "未知" : "多币种"),
+            knownTotal: only.map { $0.actual + $0.estimated },
+            knownCount: known.count,
+            unknownCount: jobs.count - known.count,
+            providerReportedCount: known.filter(\.providerReported).count,
+            totalsByCurrency: totals
         )
     }
 }
@@ -54,13 +43,15 @@ struct StoryboardBatchPreview: Equatable, Sendable {
     var acceptedShotIDs: [UUID]
     var deferredShotIDs: [UUID]
     var estimatedKnownCost: Decimal?
+    var estimatedCurrency: String? = nil
 }
 
 enum StoryboardBatchPlanner {
     static func preview(
         shots: [StoryboardShot],
         availableSlots: Int,
-        knownCostPerRequest: Decimal?
+        knownCostPerRequest: Decimal?,
+        currency: String? = nil
     ) -> StoryboardBatchPreview {
         let ordered = shots.sorted { $0.order < $1.order }
         let acceptedCount = min(max(availableSlots, 0), ordered.count)
@@ -68,7 +59,8 @@ enum StoryboardBatchPlanner {
             requestCount: ordered.count,
             acceptedShotIDs: Array(ordered.prefix(acceptedCount).map(\.id)),
             deferredShotIDs: Array(ordered.dropFirst(acceptedCount).map(\.id)),
-            estimatedKnownCost: knownCostPerRequest.map { $0 * Decimal(ordered.count) }
+            estimatedKnownCost: knownCostPerRequest.map { $0 * Decimal(ordered.count) },
+            estimatedCurrency: currency
         )
     }
 }

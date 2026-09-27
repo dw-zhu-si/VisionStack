@@ -342,6 +342,8 @@ struct GenerationJob: Identifiable, Codable, Hashable, Sendable {
     var projectID: UUID? = nil
     var agentStableID: String? = nil
     var skillStableIDs: [String]? = nil
+    var connectionID: UUID? = nil
+    var connectionSnapshot: AIProviderConfiguration? = nil
 
     var effectiveImageReferences: [ImageReferenceBinding] {
         if let imageReferences, !imageReferences.isEmpty { return imageReferences }
@@ -389,7 +391,7 @@ struct ParsedGenerationResponse: Sendable {
 }
 
 struct AppSnapshot: Codable, Sendable {
-    static let currentSchemaVersion = 11
+    static let currentSchemaVersion = 12
     var schemaVersion = currentSchemaVersion
     var conversations: [Conversation]
     var selectedConversationID: UUID?
@@ -424,6 +426,10 @@ struct AppSnapshot: Codable, Sendable {
     var storyboardBatchQueues: [StoryboardBatchQueue]? = nil
     var roughCuts: [RoughCutProject]? = nil
     var thirdPartyAIConsentVersion: Int? = nil
+    var deletedConversations: [Conversation]? = nil
+    var chatDrafts: [String: String]? = nil
+    var imageDrafts: [String: ImageCreationDraft]? = nil
+    var videoDrafts: [String: VideoCreationDraft]? = nil
 }
 
 struct ContextBudgetReport: Equatable, Sendable {

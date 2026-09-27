@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "version": "0.9.0",
+  "build": 29,
+  "status": "local-candidate",
+  "historicalStoreSubmission": {"version": "0.8.1", "build": 28, "date": "2026-09-16"},
+  "remoteAvailability": "not-checked"
+}

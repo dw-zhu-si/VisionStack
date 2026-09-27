@@ -23,7 +23,7 @@ SwiftPM 没有外部包依赖。应用使用 Apple 系统框架。脚本生成�
 
 社区脚本只做构建、资源复制和 ad-hoc 签名，不安装、不启动应用、不上传、不公证。带 App Sandbox 的本机构建仍需在自己的系统验证文件授权和 Keychain 行为。源码测试或静态签名成功不代表全部 GUI 工作流验证通过。
 
-`scripts/package_macos_app.sh` 是历史官方发行流程，含需要显式配置的正式发布身份参数、历史官方权限模板、渠道输出重建和 Apple 公证步骤，不作为社区快速入门命令。请勿把历史官方身份用于自己的发行，也不要将描述文件、私钥或公证凭证提交仓库。衍生版本须自行配置身份与发布流程。
+`scripts/package_macos_app.sh` 是本机社区构建的兼容入口，调用 `scripts/build_macos.sh`；传入正式发行渠道会在构建前拒绝。官方签名流程不属于这个社区入口。衍生发行须建立使用自身 Bundle ID、权限、签名身份与公证配置的流程，不能直接使用仓库中保留的历史官方 App Store 权限模板。不要将描述文件、私钥或公证凭证提交仓库。
 
 ## Windows
 
@@ -36,7 +36,7 @@ dotnet build VisionStack.slnx -c Release --no-restore
 dotnet test VisionStack.Windows.Tests/VisionStack.Windows.Tests.csproj -c Release --no-build
 ```
 
-源码包含 x64/ARM64 目标；DPAPI 与安装行为必须在真实 Windows 验证。`scripts/package_windows.sh` 还需要 Velopack CLI 1.2.0（`vpk`），普通编译和测试不要求打包工具。生成未签名候选不等于允许公开发行。当前尚未实现真实模型连接、对话、生图、视频及项目任务流程。
+源码包含 x64/ARM64 目标；DPAPI 与安装行为必须在真实 Windows 验证。`scripts/package_windows.sh` 还需要 Velopack CLI 1.2.0（`vpk`），普通编译和测试不要求打包工具。生成未签名候选不等于允许公开发行。当前候选已实现连接配置与目录测试、项目及草稿保存、非流式对话、OpenAI 兼容同步图片生成、任务记录和导出；42 项 Core 离线测试与 Release 编译通过。视频、参考图、完整 Agent/Skills、草剪、流式对话和异步厂商任务恢复尚未实现；真实供应商计费调用、Windows GUI 与 DPAPI 真机行为尚未验收。具体范围见 [Windows 说明](../windows/README.md)。
 
 ## 公开源码边界
 

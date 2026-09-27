@@ -134,7 +134,7 @@ private struct ModelSelectionSheet: View {
             Divider()
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "info.circle")
-                Text("496 个目录模型均显示匹配状态：正式声明、本地档案、内置高置信匹配或当前不支持。映栈不会因点选而静默扩充模型能力；图片和视频创建前仍会显示模型、参数和可能计费确认。")
+                Text("当前连接的 \(allModels.count) 个目录模型显示匹配状态：正式声明、本地档案、内置高置信匹配或当前不支持。映栈不会因点选而静默扩充模型能力；图片和视频创建前仍会显示模型、参数和可能计费确认。")
                     .font(.vsBody(10)).foregroundStyle(VSColor.muted)
                 Spacer()
             }

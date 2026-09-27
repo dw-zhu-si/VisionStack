@@ -5,6 +5,7 @@ struct RootView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var appeared = false
+    @StateObject private var navigation = WorkspaceNavigation()
     var body: some View {
         ZStack {
             if let reason = store.persistenceBlockReason {
@@ -16,20 +17,30 @@ struct RootView: View {
                     VStack(spacing: 0) {
                         TopBar()
                         Group {
-                            switch store.mode { case .chat: ChatView(); case .image: ImageStudioView(); case .video: VideoStudioView() }
+                            switch navigation.destination {
+                            case .home: ProjectHomeView()
+                            case .tasks: TaskCenterView(embedded: true, onShowAsset: navigation.showAsset)
+                            case .assets: AssetLibraryView(embedded: true, focusedJobID: navigation.focusedAssetID)
+                            case .studio:
+                                switch store.mode { case .chat: ChatView(); case .image: ImageStudioView(); case .video: VideoStudioView() }
+                            }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }
         }
+        .environmentObject(navigation)
+        .onChange(of: store.studioNavigationRequest) { navigation.destination = .studio }
+        .onChange(of: store.mode) { navigation.destination = .studio }
+        .onChange(of: store.selectedProjectID) { navigation.focusedAssetID = nil; navigation.taskQuery = ""; navigation.taskKind = "全部"; navigation.taskState = "全部"; navigation.taskPage = 0 }
+        .onChange(of: store.showingTasks) { if store.showingTasks { navigation.destination = .tasks; store.showingTasks = false } }
+        .onChange(of: store.showingAssets) { if store.showingAssets { navigation.focusedAssetID = nil; navigation.destination = .assets; store.showingAssets = false } }
         .foregroundStyle(VSColor.ink)
         .opacity(appeared ? 1 : 0).offset(y: appeared ? 0 : 8).animation(.easeOut(duration: 0.42), value: appeared)
         .onAppear { appeared = true }
         .onChange(of: scenePhase) { if scenePhase != .active { Task { await store.flushPersistence() } } }
         .sheet(isPresented: $store.showingSettings) { SettingsView().environmentObject(store) }
         .sheet(isPresented: $store.showingLibrary) { ResourceLibraryView().environmentObject(store) }
-        .sheet(isPresented: $store.showingAssets) { AssetLibraryView().environmentObject(store) }
-        .sheet(isPresented: $store.showingTasks) { TaskCenterView().environmentObject(store) }
         .sheet(isPresented: $store.showingProjects) { ProjectWorkspaceView().environmentObject(store) }
         .sheet(isPresented: $store.showingPresets) { CreativePresetManagerView().environmentObject(store) }
         .sheet(isPresented: $store.showingRoughCut) { VideoRoughCutView().environmentObject(store) }
@@ -117,6 +128,8 @@ private struct PersistenceBlockedView: View {
 }
 
 private struct SidebarView: View {
+    @EnvironmentObject private var navigation: WorkspaceNavigation
+    @State private var deleteTarget: Conversation?
     @EnvironmentObject private var store: AppStore
     @State private var renameTarget: Conversation?
     @State private var renameDraft = ""
@@ -139,16 +152,17 @@ private struct SidebarView: View {
                 }
             }.padding(.horizontal, 18).padding(.top, 20).padding(.bottom, 26)
 
+            sidebarAction("项目首页", "house") { navigation.destination = .home }.padding(.horizontal, 10)
             FieldLabel("创作模式").foregroundStyle(Color.white.opacity(0.62)).padding(.horizontal, 18)
             VStack(spacing: 7) {
                 ForEach(StudioMode.allCases) { mode in
-                    Button { store.mode = mode } label: {
+                    Button { store.mode = mode; navigation.destination = .studio } label: {
                         HStack(spacing: 12) {
                             Image(systemName: mode.symbol).frame(width: 20)
                             VStack(alignment: .leading, spacing: 1) { Text(mode.title).font(.vsLabel(13)); Text(mode.subtitle).font(.vsBody(11)).opacity(0.68) }
-                            Spacer(); if store.mode == mode { Circle().fill(VSColor.orange).frame(width: 6, height: 6) }
+                            Spacer(); if navigation.destination == .studio && store.mode == mode { Circle().fill(VSColor.orange).frame(width: 6, height: 6) }
                         }.foregroundStyle(Color.white).padding(.horizontal, 13).padding(.vertical, 10)
-                            .background(store.mode == mode ? Color.white.opacity(0.12) : Color.clear).clipShape(RoundedRectangle(cornerRadius: 10))
+                            .background(navigation.destination == .studio && store.mode == mode ? Color.white.opacity(0.12) : Color.clear).clipShape(RoundedRectangle(cornerRadius: 10))
                     }.buttonStyle(.plain)
                 }
             }.padding(10)
@@ -168,22 +182,29 @@ private struct SidebarView: View {
             ScrollView {
                 LazyVStack(spacing: 4) {
                     ForEach(visibleConversations) { conversation in
-                        Button { store.selectConversation(conversation.id) } label: {
+                        Button { store.selectConversation(conversation.id); navigation.destination = .studio } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(conversation.title).font(.vsBody(11)).lineLimit(1)
                                 Text(conversation.updatedAt.formatted(date: .omitted, time: .shortened)).font(.vsBody(11)).opacity(0.58)
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 8)
-                                .background(store.selectedConversationID == conversation.id && store.mode == .chat ? Color.white.opacity(0.10) : Color.clear)
+                                .background(navigation.destination == .studio && store.selectedConversationID == conversation.id && store.mode == .chat ? Color.white.opacity(0.10) : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                         }.buttonStyle(.plain).foregroundStyle(Color.white.opacity(0.84))
                         .contextMenu {
                             Button("重命名") { renameTarget = conversation; renameDraft = conversation.title }
                             if conversation.archivedAt == nil { Button("归档") { store.archiveConversation(conversation.id) } }
                             else { Button("恢复") { store.restoreConversation(conversation.id) } }
-                            Button("删除", role: .destructive) { store.deleteConversation(conversation.id) }
+                            Button("删除", role: .destructive) { deleteTarget = conversation }
                         }
+                        .accessibilityAction(named: "删除对话") { deleteTarget = conversation }
+                        .accessibilityAction(named: "重命名对话") { renameTarget = conversation; renameDraft = conversation.title }
                     }
                 }.padding(.horizontal, 10).padding(.top, 8)
+            }
+            if let deletedTitle = store.lastDeletedConversationTitle {
+                Button { _ = store.undoDeleteConversation() } label: {
+                    Label("撤销删除：\(deletedTitle)", systemImage: "arrow.uturn.backward").lineLimit(1)
+                }.buttonStyle(.plain).font(.vsBody(11)).foregroundStyle(.white).padding(.horizontal, 18).padding(.vertical, 8)
             }
             Spacer(minLength: 12)
             VStack(spacing: 5) {
@@ -197,6 +218,10 @@ private struct SidebarView: View {
             }.padding(10)
         }
         .background(VSColor.ink.opacity(0.97))
+        .alert("删除对话？", isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })) {
+            Button("删除对话", role: .destructive) { if let id = deleteTarget?.id { store.deleteConversation(id) }; deleteTarget = nil }
+            Button("取消", role: .cancel) { deleteTarget = nil }
+        } message: { Text("将移除“\(deleteTarget?.title ?? "")”及全部消息。可以通过侧栏“撤销删除”恢复。") }
         .alert("重命名对话", isPresented: Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
             TextField("对话名称", text: $renameDraft)
             Button("保存") { if let id = renameTarget?.id { store.renameConversation(id, to: renameDraft) }; renameTarget = nil }
@@ -209,19 +234,25 @@ private struct SidebarView: View {
 }
 
 private struct TopBar: View {
+    @EnvironmentObject private var navigation: WorkspaceNavigation
+    private var title: String { switch navigation.destination { case .home: "项目首页"; case .tasks: "任务中心"; case .assets: "素材库"; case .studio: store.mode.title } }
+    private var subtitle: String { switch navigation.destination { case .home: "创作进度与交付"; case .tasks: "执行进度与恢复"; case .assets: "评审、整理与导出"; case .studio: store.mode.subtitle } }
     @EnvironmentObject private var store: AppStore
     var body: some View {
         HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 1) { Text(store.mode.title).font(.vsTitle(20)); Text(store.mode.subtitle).font(.vsBody(11)).foregroundStyle(VSColor.muted) }
+            VStack(alignment: .leading, spacing: 1) { Text(title).font(.vsTitle(20)); Text(subtitle).font(.vsBody(11)).foregroundStyle(VSColor.muted) }
             Spacer()
+            if navigation.focusedAssetID != nil {
+                Button("返回") { navigation.returnFromAsset() }.help("返回素材来源页面")
+            }
             Button { store.showingProjects = true } label: {
                 HStack(spacing: 6) { Image(systemName: "folder"); Text(store.selectedProject?.name ?? "项目").lineLimit(1) }
                     .font(.vsLabel(10)).padding(.horizontal, 10).padding(.vertical, 7).background(Color.white.opacity(0.68)).clipShape(Capsule())
             }.buttonStyle(.plain).foregroundStyle(VSColor.ink).frame(maxWidth: 180)
             Button { if !store.connection.isConnected { store.showingSettings = true } } label: { StatusPill(title: store.connection.title, color: statusColor) }
-                .buttonStyle(.plain).help(store.connection.detail ?? "ModelHub 连接正常")
+                .buttonStyle(.plain).help(connectionSummary)
             Button { Task { await store.refreshModelHub() } } label: { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.plain).foregroundStyle(VSColor.ink).help("刷新 ModelHub").accessibilityLabel("刷新 ModelHub")
+                .buttonStyle(.plain).foregroundStyle(VSColor.ink).help("刷新当前连接").accessibilityLabel("刷新当前连接")
             Button { store.showingTasks = true } label: {
                 HStack(spacing: 6) { Image(systemName: "list.bullet.rectangle"); Text("\(store.currentProjectTaskCount)") }
                     .font(.vsLabel(11)).padding(.horizontal, 10).padding(.vertical, 7).background(Color.white.opacity(0.68)).clipShape(Capsule())
@@ -236,6 +267,15 @@ private struct TopBar: View {
             }.buttonStyle(.plain).foregroundStyle(VSColor.ink).accessibilityLabel("创作 Agent，共 \(store.installedAgentCount) 个")
         }.padding(.horizontal, 22).frame(height: 64).background(VSColor.paper.opacity(0.90))
             .overlay(alignment: .bottom) { Rectangle().fill(VSColor.ink.opacity(0.10)).frame(height: 1) }
+    }
+    private var connectionSummary: String {
+        let name = store.activeProvider?.displayName ?? "模型服务"
+        switch store.connection {
+        case .offline: return "\(name) 离线；打开设置检查连接。"
+        case .connecting: return "正在连接 \(name)…"
+        case .connected(let count): return "\(name) 已连接，\(count) 个模型可用。"
+        case .failed(let reason): return "\(name) 连接失败：\(reason)"
+        }
     }
     private var statusColor: Color { switch store.connection { case .connected: VSColor.moss; case .connecting: VSColor.orange; default: VSColor.vermilion } }
 }

@@ -29,7 +29,13 @@
 
 **典型流程：** 整理想法 → 导入参考 → 探索图片 → 编排分镜 → 本机草剪 → 保存作品与项目。
 
-> **当前平台状态：** macOS 正式版可下载；Windows 源码已公开，仍处于配置管理原型阶段，尚无可用的正式安装包。
+> **当前平台状态：** macOS 正式版可下载；Windows 源码已公开；本地升级候选已扩展创作流程，尚无经过本轮真机验收的正式升级安装包。
+
+## 开发中的 0.9.0（build 29）
+
+这是**尚未发布的本地候选**；下方正式版下载仍指向 0.8.1。候选新增项目首页与主区任务/素材导航、项目和会话草稿恢复、对话删除撤销、素材分页及选择保护，并改进原厂商任务重试、本机下载取消、分币种实际/预计费用与数据恢复。
+
+macOS 升级沿用原生 SwiftUI。Windows 升级代码已编译，**42 项 Core 测试通过**；Windows 真机与 GUI 验收被 Parallels 授权过期阻塞，不能将这些测试写成完整 Windows 版本已验收或已发布。版本由 `release/version.json` 管理；本地候选不等于 GitHub Release 或 App Store 审核结果。
 
 ## 核心功能
 
@@ -70,7 +76,7 @@
 | 平台 | 要求与进度 | 下载 |
 | :--- | :--- | :--- |
 | **macOS · Apple Silicon** | macOS 14 或更新版本，正式版 | **[DMG 安装包](https://github.com/dw-zhu-si/VisionStack/releases/download/v0.8.1/VisionStack-0.8.1-macos-arm64.dmg)** · [ZIP](https://github.com/dw-zhu-si/VisionStack/releases/download/v0.8.1/VisionStack-0.8.1-macos-arm64.zip) |
-| **Windows · x64 / ARM64** | 原型开发中，尚无正式安装包 | [源码与当前范围](windows/README.md) |
+| **Windows · x64 / ARM64** | 本地升级候选，真机验收受阻，尚无正式升级安装包 | [源码与当前范围](windows/README.md) |
 | **macOS · Intel** | 当前未提供官方安装包 | — |
 
 校验文件：[DMG SHA-256](https://github.com/dw-zhu-si/VisionStack/releases/download/v0.8.1/VisionStack-0.8.1-macos-arm64.dmg.sha256) · [ZIP SHA-256](https://github.com/dw-zhu-si/VisionStack/releases/download/v0.8.1/VisionStack-0.8.1-macos-arm64.zip.sha256)。其他版本见 [Releases](https://github.com/dw-zhu-si/VisionStack/releases)。
@@ -115,7 +121,7 @@ swift test
 ./scripts/build_macos.sh
 ```
 
-输出位于 `dist/community/build.*/VisionStack-community-*.zip`，内含“映栈社区版.app”。无需 Apple 开发者账号；社区构建使用独立的数据目录与凭证命名，默认要求第三方 AI 请求同意。
+输出位于 `artifacts/releases/test/<version>/macos-arm64/build<build>-community/VisionStack-community-*.zip`，内含“映栈社区版.app”。无需 Apple 开发者账号；社区构建使用独立的数据目录与凭证命名，默认要求第三方 AI 请求同意。
 
 社区版为本机 ad-hoc 签名构建，未经 Apple 公证。它包含社区构建适配，不保证与官方 0.8.1 二进制逐字节一致。
 
@@ -130,7 +136,7 @@ dotnet build VisionStack.slnx -c Release --no-restore
 dotnet test VisionStack.Windows.Tests/VisionStack.Windows.Tests.csproj -c Release --no-build
 ```
 
-当前 Windows 已实现厂商配置与凭证存储基础；真实模型连接、对话、生图、视频及项目任务流程尚未完成。构建成功不代表已通过真实 Windows 安装与运行验收。
+Windows 当前本地候选已扩展项目、对话、图片生成、任务记录、保存和导出流程，编译及 42 项 Core 测试通过；真实供应商调用未作为自动测试执行，Parallels 授权过期阻塞本轮 Windows GUI 验收。构建成功不代表已通过真实 Windows 安装与运行验收。Windows 视频、分镜、草剪和完整 Agent 功能尚未对齐 macOS。
 
 ### 项目结构
 
@@ -139,7 +145,7 @@ VisionStack/
 ├── Sources/VisionStack/   # macOS 应用与内置创作资源
 ├── Tests/                # Swift 单元测试
 ├── Packaging/            # 权限、隐私清单与应用元数据
-├── windows/              # Windows 原型及测试
+├── windows/              # Windows 候选工程及测试
 ├── scripts/              # 社区构建与打包脚本
 └── docs/                 # 开发说明
 ```
@@ -152,8 +158,8 @@ VisionStack/
 | :--- | :--- |
 | macOS 图片、视频与项目工作流 | 已提供正式版与源码 |
 | 社区本机构建、单元测试与文档 | 已提供 |
-| Windows 厂商配置和本地凭证存储 | 已有原型 |
-| Windows 核心创作功能 | 待完成 |
+| Windows 厂商配置和本地凭证存储 | 候选代码已实现，待真机验收 |
+| Windows 核心创作功能 | 本地候选已编译，42 项 Core 测试通过；真实 GUI 验收受阻 |
 | Windows 可信签名与真实设备验收 | 待完成，尚未公布发布日期 |
 
 欢迎提交可复现的问题与改进。贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，说明改动目的、平台和验证结果。新增代码或素材需要明确来源与许可，复现材料请使用合成数据。
@@ -179,7 +185,7 @@ VisionStack/
 <details>
 <summary><strong>开源是否意味着 Windows 已经可以日常使用？</strong></summary>
 
-目前公开的是 Windows 配置管理原型，还缺少核心创作流程。Windows 正式安装包需在功能、可信签名与真实 Windows 验收完成后另行发布。
+0.9.0 本地候选已经扩展核心创作流程，但自动测试并不代表可日常使用。Windows 正式升级安装包需在功能、可信签名与真实 Windows 验收完成后另行发布；目前真机验收被 Parallels 授权过期阻塞。
 
 </details>
 

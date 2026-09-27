@@ -3,14 +3,38 @@ import SwiftUI
 
 struct ImageStudioView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var size = "1024x1024"
-    @State private var quality = "auto"
-    @State private var customWidth = 1024
-    @State private var customHeight = 1024
-    @State private var batchCount = 1
-    @State private var referenceAssetID: UUID?
-    @State private var identityReferenceAssetID: UUID?
-    @State private var photographyReferenceAssetID: UUID?
+    private var size: String {
+        get { store.imageDraft.size }
+        nonmutating set { store.imageDraft.size = newValue }
+    }
+    private var quality: String {
+        get { store.imageDraft.quality }
+        nonmutating set { store.imageDraft.quality = newValue }
+    }
+    private var customWidth: Int {
+        get { store.imageDraft.customWidth }
+        nonmutating set { store.imageDraft.customWidth = newValue }
+    }
+    private var customHeight: Int {
+        get { store.imageDraft.customHeight }
+        nonmutating set { store.imageDraft.customHeight = newValue }
+    }
+    private var batchCount: Int {
+        get { store.imageDraft.batchCount }
+        nonmutating set { store.imageDraft.batchCount = newValue }
+    }
+    private var referenceAssetID: UUID? {
+        get { store.imageDraft.referenceAssetID }
+        nonmutating set { store.imageDraft.referenceAssetID = newValue }
+    }
+    private var identityReferenceAssetID: UUID? {
+        get { store.imageDraft.identityReferenceAssetID }
+        nonmutating set { store.imageDraft.identityReferenceAssetID = newValue }
+    }
+    private var photographyReferenceAssetID: UUID? {
+        get { store.imageDraft.photographyReferenceAssetID }
+        nonmutating set { store.imageDraft.photographyReferenceAssetID = newValue }
+    }
     @State private var confirming = false
 
     private var profile: CapabilityProfile? { store.profile(for: store.preferredImageModel) }
@@ -73,8 +97,8 @@ struct ImageStudioView: View {
                                 ModelSelectionControl(operation: .image, selection: $store.preferredImageModel)
                                 CapabilityNote(profile: profile)
                                 HStack(spacing: 12) {
-                                    parameterPicker("尺寸", selection: $size, values: sizeOptions)
-                                    parameterPicker("质量", selection: $quality, values: qualities)
+                                    parameterPicker("尺寸", selection: $store.imageDraft.size, values: sizeOptions)
+                                    parameterPicker("质量", selection: $store.imageDraft.quality, values: qualities)
                                 }.disabled(!store.canUseModelService)
                                 CreativePresetPicker(operation: .image) { preset in
                                     let applied = CreativePresetResolver.apply(
@@ -99,9 +123,9 @@ struct ImageStudioView: View {
                                 if usesCustomSize {
                                     VStack(alignment: .leading, spacing: 7) {
                                         HStack(spacing: 10) {
-                                            dimensionField("宽度", value: $customWidth)
+                                            dimensionField("宽度", value: $store.imageDraft.customWidth)
                                             Text("×").font(.vsLabel(12)).foregroundStyle(VSColor.muted)
-                                            dimensionField("高度", value: $customHeight)
+                                            dimensionField("高度", value: $store.imageDraft.customHeight)
                                             Text("px").font(.vsBody(10)).foregroundStyle(VSColor.muted)
                                         }
                                         if let message = customDimensionValidation.message {
@@ -116,8 +140,8 @@ struct ImageStudioView: View {
                                 MediaAgentSkillPicker(operation: .image)
                                 if usesPortraitReferenceGroup {
                                     PortraitReferenceGroupPicker(
-                                        identitySelection: $identityReferenceAssetID,
-                                        photographySelection: $photographyReferenceAssetID,
+                                        identitySelection: $store.imageDraft.identityReferenceAssetID,
+                                        photographySelection: $store.imageDraft.photographyReferenceAssetID,
                                         supported: profile?.supportsReferenceImage == true
                                     )
                                     if imageReferences.count > 1 && !store.preferredImageModel.lowercased().contains("qwen-image") {
@@ -125,14 +149,14 @@ struct ImageStudioView: View {
                                             .font(.vsBody(9)).foregroundStyle(VSColor.vermilion)
                                     }
                                 } else {
-                                    ReferenceAssetPicker(selection: $referenceAssetID, supported: profile?.supportsReferenceImage == true)
+                                    ReferenceAssetPicker(selection: $store.imageDraft.referenceAssetID, supported: profile?.supportsReferenceImage == true)
                                     Text("可从“管理参考图”预览、复用或删除当前项目的参考图片。")
                                         .font(.vsBody(9)).foregroundStyle(VSColor.muted)
                                 }
                                 HStack {
                                     FieldLabel("批量版本")
                                     Spacer()
-                                    Stepper("\(batchCount) 个", value: $batchCount, in: 1...4).frame(width: 120)
+                                    Stepper("\(batchCount) 个", value: $store.imageDraft.batchCount, in: 1...4).frame(width: 120)
                                 }
                             }
                             Button { confirming = true } label: { HStack { Image(systemName: "sparkles.rectangle.stack"); Text(batchCount == 1 ? "生成图片" : "生成 \(batchCount) 个版本"); Spacer(); Text("可能计费").opacity(0.62) } }
@@ -173,7 +197,7 @@ struct ImageStudioView: View {
                 }
             }
             Button("取消", role: .cancel) {}
-        } message: { Text("尺寸：\(effectiveSize)；质量：\(quality)；参考图：\(referenceSummary)；\(store.mediaRoutingSummary(for: .image))。ModelHub 将使用现有供应商余额。") }
+        } message: { Text("尺寸：\(effectiveSize)；质量：\(quality)；参考图：\(referenceSummary)；\(store.mediaRoutingSummary(for: .image))。当前模型服务商可能另行计费。") }
         .onChange(of: store.preferredImageModel) {
             size = ParameterSelectionPolicy.preserving(size, allowed: sizeOptions, fallback: "1024x1024")
             quality = ParameterSelectionPolicy.preserving(quality, allowed: qualities, fallback: "auto")

@@ -191,40 +191,10 @@ actor KeychainProviderCredentialStore: ProviderCredentialStoring {
     }
 }
 
-private final class SameOriginRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    let scheme: String
-    let host: String
-    let port: Int?
-
-    init(baseURL: URL) {
-        scheme = baseURL.scheme?.lowercased() ?? ""
-        host = baseURL.host?.lowercased() ?? ""
-        port = baseURL.port
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
-    ) {
-        guard let url = request.url,
-              url.scheme?.lowercased() == scheme,
-              url.host?.lowercased() == host,
-              url.port == port else {
-            completionHandler(nil)
-            return
-        }
-        completionHandler(request)
-    }
-}
-
 actor DirectAIProviderClient: ModelHubServicing {
     private let configuration: AIProviderConfiguration
     private let apiKey: String
     private let baseURL: URL
-    private let session: URLSession
     private var cachedCatalog: ModelCatalog?
 
     init(configuration: AIProviderConfiguration, apiKey: String) throws {
@@ -235,12 +205,6 @@ actor DirectAIProviderClient: ModelHubServicing {
         self.configuration = configuration
         self.apiKey = apiKey
         self.baseURL = url
-        let delegate = SameOriginRedirectDelegate(baseURL: url)
-        let config = URLSessionConfiguration.ephemeral
-        config.waitsForConnectivity = false
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.urlCache = nil
-        self.session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
 
     func health() async throws -> ModelHubRuntimeStatus {
@@ -431,7 +395,7 @@ actor DirectAIProviderClient: ModelHubServicing {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await PublicHTTPTransport.data(for: request, maximumBytes: 64 * 1_024 * 1_024)
         guard data.count <= 64 * 1_024 * 1_024 else { throw VisionStackError.invalidResponse("厂商响应超过 64 MB 安全上限。") }
         guard let http = response as? HTTPURLResponse else { throw VisionStackError.invalidResponse() }
         let json = (try? JSONSerialization.jsonObject(with: data)) ?? ["raw": String(data: data, encoding: .utf8) ?? ""]

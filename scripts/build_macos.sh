@@ -5,7 +5,10 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
-version="${VERSION:-0.8.1}"
+override_reason="${RELEASE_OVERRIDE_REASON:-}"
+resolved_version="$(python3 "$project_root/scripts/check_release_consistency.py" --resolve --mode community --version "${VERSION:-}" --build "${BUILD_NUMBER:-}" --override-reason "$override_reason")"
+version="${resolved_version%% *}"
+build_number="${resolved_version##* }"
 case "$version" in
   ''|*[!0-9.]*) echo 'VERSION must contain only digits and periods.' >&2; exit 64 ;;
 esac
@@ -15,13 +18,28 @@ done
 for required in Package.swift Packaging/PrivacyInfo.xcprivacy Packaging/VisionStack.entitlements Sources/VisionStack/Resources/AppIcon.png; do
   [[ -f "$project_root/$required" ]] || { echo "Missing repository input: $required" >&2; exit 66; }
 done
+# Immutable local artifact family; do not touch earlier dist or release outputs.
+output_dir="$project_root/artifacts/releases/test/$version/macos-arm64/build${build_number}-community"
+python3 - "$project_root" "$output_dir" <<'PREFLIGHT'
+from pathlib import Path
+import sys
+root, output = map(Path, sys.argv[1:])
+if not output.resolve().is_relative_to(root.resolve() / "artifacts/releases"):
+    raise SystemExit("Artifact output escapes the project release root")
+if output.exists() and (not output.is_dir() or any(output.iterdir())):
+    raise SystemExit("Artifact family already exists and is nonempty; refusing to overwrite: " + str(output))
+output.mkdir(parents=True, exist_ok=True)
+(output / ".packaging.lock").mkdir()
+PREFLIGHT
+# A failed build may leave an empty family; only our empty lock is removed.
+trap 'rmdir "$output_dir/.packaging.lock" 2>/dev/null || true' EXIT
 # Assemble and sign outside Desktop/FileProvider; retain only an archive.
 export COPYFILE_DISABLE=1
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/visionstack-community-build.XXXXXX")"
-trap 'rm -rf "$scratch"' EXIT
+trap 'rm -rf "$scratch"; rmdir "$output_dir/.packaging.lock" 2>/dev/null || true' EXIT
 cd "$project_root"
-swift build -c release --product VisionStack --scratch-path "$scratch/build"
-bin_dir="$(swift build -c release --show-bin-path --scratch-path "$scratch/build")"
+swift build --build-system native -c release --product VisionStack --scratch-path "$scratch/build"
+bin_dir="$(swift build --build-system native -c release --show-bin-path --scratch-path "$scratch/build")"
 resource_bundle="$bin_dir/VisionStack_VisionStack.bundle"
 [[ -x "$bin_dir/VisionStack" && -d "$resource_bundle/ManagedSkills" ]] || {
   echo 'SwiftPM output is missing the executable or bundled capabilities.' >&2; exit 65;
@@ -52,7 +70,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleShortVersionString</key><string>$version</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleVersion</key><string>$build_number</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>VisionStackDistributionProfile</key><string>public</string>
@@ -65,8 +83,6 @@ plutil -lint "$app/Contents/Info.plist"
 xattr -cr "$app"
 codesign --force --sign - --entitlements "$project_root/Packaging/VisionStack.entitlements" "$app"
 codesign --verify --strict "$app"
-mkdir -p "$project_root/dist/community"
-output_dir="$(mktemp -d "$project_root/dist/community/build.XXXXXX")"
 archive="$output_dir/VisionStack-community-$version.zip"
 ditto -c -k --norsrc --keepParent "$app" "$archive"
 # Verify the archive round trip in the same local scratch area before reporting success.
@@ -81,3 +97,5 @@ printf 'ditto -x -k %q "$community_run_dir"\n' "$archive"
 printf '%s\n' 'codesign --verify --strict "$community_run_dir/映栈社区版.app"'
 printf '%s\n' 'open "$community_run_dir/映栈社区版.app"'
 printf '%s\n' 'Ad-hoc signed only; not notarized, installed, launched, or validated by Gatekeeper.'
+
+python3 "$project_root/scripts/check_release_consistency.py" --record-success --mode community --version "$version" --build "$build_number" --override-reason "$override_reason"

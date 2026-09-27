@@ -1286,7 +1286,8 @@ final class VisionStackTests: XCTestCase {
             prompt: "原图",
             model: "provider/removed-image",
             parameters: ["size": "1K", "quality": "auto"],
-            state: .failed
+            state: .failed,
+            connectionID: AIProviderConfiguration.defaultModelHubID
         )
         let currentModel = ModelDescriptor(id: "provider/current-image", owner: "provider", availability: "available")
         let store = AppStore()
@@ -1308,14 +1309,16 @@ final class VisionStackTests: XCTestCase {
             prompt: "失败任务",
             model: model.id,
             parameters: ["size": "1K", "quality": "auto"],
-            state: .failed
+            state: .failed,
+            connectionID: AIProviderConfiguration.defaultModelHubID
         )
         let active = GenerationJob(
             kind: .image,
             prompt: "活动任务",
             model: model.id,
             parameters: ["size": "1K", "quality": "auto"],
-            state: .running
+            state: .running,
+            connectionID: AIProviderConfiguration.defaultModelHubID
         )
         let store = AppStore()
         store.connection = .connected(1)
@@ -1337,7 +1340,8 @@ final class VisionStackTests: XCTestCase {
             prompt: "失败镜头",
             model: model.id,
             parameters: ["size": "720p", "aspect_ratio": "16:9", "duration_seconds": "5"],
-            state: .failed
+            state: .failed,
+            connectionID: AIProviderConfiguration.defaultModelHubID
         )
         let activeRetry = GenerationJob(
             kind: .video,
@@ -1387,7 +1391,8 @@ final class VisionStackTests: XCTestCase {
             prompt: "任务",
             model: model.id,
             parameters: ["size": "1K", "quality": "auto"],
-            state: .running
+            state: .running,
+            connectionID: AIProviderConfiguration.defaultModelHubID
         )
         let store = AppStore()
         store.connection = .connected(1)
@@ -1721,7 +1726,8 @@ final class VisionStackTests: XCTestCase {
             submissionState: .unknown,
             providerState: .unknown,
             clientRequestID: requestID,
-            idempotencyKey: "visionstack-\(requestID.uuidString)"
+            idempotencyKey: "visionstack-\(requestID.uuidString)",
+            connectionID: AIProviderConfiguration.defaultModelHubID
         )
         let store = AppStore(persistence: PersistenceService(root: root), modelHubFactory: { _, _ in fake })
         store.imageJobs = [job]
@@ -1753,7 +1759,8 @@ final class VisionStackTests: XCTestCase {
             submissionState: .unknown,
             providerState: .unknown,
             clientRequestID: requestID,
-            idempotencyKey: "visionstack-\(requestID.uuidString)"
+            idempotencyKey: "visionstack-\(requestID.uuidString)",
+            connectionID: AIProviderConfiguration.defaultModelHubID
         )
         let store = AppStore(persistence: PersistenceService(root: root), modelHubFactory: { _, _ in fake })
         store.imageJobs = [job]

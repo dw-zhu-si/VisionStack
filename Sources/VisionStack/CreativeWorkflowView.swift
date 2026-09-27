@@ -466,7 +466,7 @@ struct StoryboardPanel: View {
 
     private var batchConfirmationText: String {
         let costText = batchPreview.estimatedKnownCost.map {
-            "按本项目已知历史单价估算约 ¥\(NSDecimalNumber(decimal: $0).stringValue)"
+            "按同连接、模型与尺寸的历史单价预计约 \(batchPreview.estimatedCurrency ?? "币种未知") \(NSDecimalNumber(decimal: $0).stringValue)（时长和供应商价格变化会影响实际费用）"
         } ?? "供应商未返回足够单价，当前只能显示请求数，金额未知"
         return "当前项目共 \(batchPreview.requestCount) 个分镜；首轮可并发 \(batchPreview.acceptedShotIDs.count) 个，其余进入可暂停、可恢复队列。\(costText)。每个分镜仍是独立的可能计费请求。"
     }

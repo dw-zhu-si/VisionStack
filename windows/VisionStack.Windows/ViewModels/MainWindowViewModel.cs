@@ -29,6 +29,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
 {
     private readonly ProviderCatalogStore _catalogStore;
     private readonly IProviderCredentialStore _credentialStore;
+    private bool _catalogLoaded;
+    private Guid? _editingProviderId;
     private ProviderCatalog _catalog = ProviderCatalog.CreateDefault();
 
     public MainWindowViewModel(string dataRoot, IProviderCredentialStore credentialStore)
@@ -36,6 +38,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
         _credentialStore = credentialStore ?? throw new ArgumentNullException(nameof(credentialStore));
         _catalogStore = new ProviderCatalogStore(dataRoot);
+        _workspaceRoot = Path.Combine(Path.GetFullPath(dataRoot), "workspace");
         ProviderKinds =
         [
             new(
@@ -88,6 +91,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private string _secret = string.Empty;
 
     [ObservableProperty]
+    private bool _clearStoredSecret;
+
+    [ObservableProperty]
     private string _manualModelIds = string.Empty;
 
     [ObservableProperty]
@@ -104,19 +110,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
+        var errors = new List<string>();
         try
         {
             _catalog = await _catalogStore.LoadAsync();
-            RefreshProviderCards();
-            SetStatus("已加载本机模型厂商配置。", isError: false);
+            _catalogLoaded = true;
         }
-        catch (Exception error) when (error is IOException or JsonException or InvalidDataException or
-                                      UnauthorizedAccessException)
-        {
-            _catalog = ProviderCatalog.CreateDefault();
-            RefreshProviderCards();
-            SetStatus($"配置文件未能安全加载：{error.Message}", isError: true);
-        }
+        catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException or ProviderEndpointException)
+        { errors.Add("厂商配置未能加载；已阻止写入以保留原文件。"); }
+        RefreshProviderCards();
+        try { await LoadWorkspaceAsync(); }
+        catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException)
+        { errors.Add("工作区未能加载；已阻止保存以保留原项目文件。"); }
+        SetStatus(errors.Count == 0 ? "已加载本机模型厂商配置与工作区。" : string.Join("\n", errors), errors.Count > 0);
     }
 
     partial void OnSelectedProviderKindChanged(ProviderKindOption? value)
@@ -126,9 +132,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
+        _editingProviderId = null;
+        Secret = ""; ClearStoredSecret = false;
         DisplayName = value.Title;
         BaseUrl = value.DefaultBaseUrl;
         SetStatus(value.Summary, isError: false);
+    }
+
+    [RelayCommand]
+    private void NewProvider()
+    {
+        _editingProviderId = null; Secret = ""; ClearStoredSecret = false;
+        DisplayName = "新厂商";
     }
 
     [RelayCommand]
@@ -155,20 +170,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task SaveAsync()
     {
-        if (IsBusy)
-        {
-            return;
-        }
+        if (IsBusy) return;
+        if (!_catalogLoaded) { SetStatus("厂商配置未能加载，已阻止写入原文件。", true); return; }
 
         IsBusy = true;
         ProviderConnectionRegistration? registration = null;
-        bool credentialWritten = false;
+
         try
         {
             ProviderKind kind = SelectedProviderKind?.Kind ?? ProviderKind.ModelHub;
-            ProviderConnectionMetadata? existingModelHub = kind == ProviderKind.ModelHub
-                ? _catalog.Connections.FirstOrDefault(item => item.Id == ProviderCatalog.DefaultModelHubId)
-                : null;
+            ProviderConnectionMetadata? existingModelHub = _catalog.Connections.FirstOrDefault(item => item.Id == (_editingProviderId ?? (kind == ProviderKind.ModelHub ? ProviderCatalog.DefaultModelHubId : Guid.Empty)));
             registration = ProviderConnectionRegistration.Create(
                 new ProviderConnectionInput(
                     DisplayName,
@@ -180,32 +191,25 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 existingModelHub?.Id,
                 existingModelHub?.CreatedAt);
 
-            await _credentialStore.SaveAsync(registration.Metadata.Id, registration.Secret);
-            credentialWritten = registration.Secret.Length > 0;
             ProviderCatalog next = _catalog.AddAndSelect(registration.Metadata);
-            await _catalogStore.SaveAsync(next);
+            await CredentialTransaction.CommitAsync(
+                ClearStoredSecret ? CredentialEdit.Clear : Secret.Length == 0 ? CredentialEdit.Preserve : CredentialEdit.Replace,
+                registration.Secret,
+                () => _credentialStore.ReadAsync(registration.Metadata.Id),
+                value => _credentialStore.SaveAsync(registration.Metadata.Id, value),
+                () => _catalogStore.SaveAsync(next));
             _catalog = next;
+            _editingProviderId = registration.Metadata.Id;
+            ConsentToProvider = false; ConsentToCharge = false; Models.Clear();
             Secret = string.Empty;
+            ClearStoredSecret = false;
             RefreshProviderCards();
             SetStatus("厂商配置已保存；密钥与普通配置已分离存储。连接测试需由用户单独触发。", isError: false);
         }
         catch (Exception error) when (error is ProviderEndpointException or ArgumentException or IOException or
                                       UnauthorizedAccessException or InvalidDataException or JsonException or
-                                      CryptographicException)
+                                      CryptographicException or AggregateException)
         {
-            if (credentialWritten && registration is not null)
-            {
-                try
-                {
-                    await _credentialStore.DeleteAsync(registration.Metadata.Id);
-                }
-                catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException or
-                                                     CryptographicException)
-                {
-                    // Preserve the original error; an orphaned encrypted credential is not exposed.
-                }
-            }
-
             SetStatus(error.Message, isError: true);
         }
         finally
@@ -217,10 +221,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task SelectProviderAsync(Guid providerId)
     {
-        if (IsBusy)
-        {
-            return;
-        }
+        if (IsBusy) return;
+        if (!_catalogLoaded) { SetStatus("厂商配置未能加载，已阻止写入原文件。", true); return; }
 
         IsBusy = true;
         try
@@ -228,6 +230,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
             ProviderCatalog next = _catalog.Select(providerId);
             await _catalogStore.SaveAsync(next);
             _catalog = next;
+            var connection = next.Connections.Single(item => item.Id == providerId);
+            SelectedProviderKind = ProviderKinds.Single(item => item.Kind == connection.Kind);
+            _editingProviderId = connection.Id;
+            DisplayName = connection.DisplayName; BaseUrl = connection.BaseUrl;
+            ManualModelIds = string.Join("\n", connection.ManualModelIds);
+            Secret = ""; ClearStoredSecret = false;
+            ConsentToProvider = false; ConsentToCharge = false; Models.Clear();
+
             RefreshProviderCards();
             SetStatus("当前模型厂商已切换；尚未发起联网请求。", isError: false);
         }
@@ -245,24 +255,26 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task DeleteProviderAsync(Guid providerId)
     {
-        if (IsBusy)
-        {
-            return;
-        }
+        if (IsBusy) return;
+        if (!_catalogLoaded) { SetStatus("厂商配置未能加载，已阻止写入原文件。", true); return; }
 
         IsBusy = true;
         try
         {
             ProviderCatalog next = _catalog.Remove(providerId);
-            await _catalogStore.SaveAsync(next);
+            await CredentialTransaction.CommitAsync(CredentialEdit.Clear, "",
+                () => _credentialStore.ReadAsync(providerId),
+                value => _credentialStore.SaveAsync(providerId, value),
+                () => _catalogStore.SaveAsync(next));
             _catalog = next;
+            _editingProviderId = null;
+            ConsentToProvider = false; ConsentToCharge = false; Models.Clear();
             RefreshProviderCards();
-            await _credentialStore.DeleteAsync(providerId);
             SetStatus("厂商配置与对应的加密密钥已删除。", isError: false);
         }
         catch (Exception error) when (error is KeyNotFoundException or InvalidOperationException or
                                       IOException or UnauthorizedAccessException or InvalidDataException or
-                                      JsonException or CryptographicException)
+                                      JsonException or CryptographicException or AggregateException)
         {
             SetStatus(error.Message, isError: true);
         }

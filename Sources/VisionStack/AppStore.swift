@@ -53,6 +53,28 @@ final class AppStore: ObservableObject {
     typealias ProviderFactory = @Sendable (AIProviderConfiguration, String) throws -> any ModelHubServicing
     typealias LocalMediaSkillLoader = @Sendable () throws -> LocalMediaSkillScanResult
     @Published var mode: StudioMode = .chat
+    @Published var studioNavigationRequest = UUID()
+    func requestStudio(_ mode: StudioMode) { self.mode = mode; studioNavigationRequest = UUID() }
+    @Published private var deletedConversations: [Conversation] = []
+    var lastDeletedConversationTitle: String? { deletedConversations.last?.title }
+    @discardableResult
+    func undoDeleteConversation() -> Bool {
+        guard persistenceBlockReason == nil, var restored = deletedConversations.popLast() else { return false }
+        if restored.projectID == nil || !projects.contains(where: { $0.id == restored.projectID }) {
+            let oldKey = (restored.projectID?.uuidString ?? "unassigned") + ":" + restored.id.uuidString
+            var target = projects.first(where: { $0.id == selectedProjectID && $0.archivedAt == nil }) ?? projects.first(where: { $0.archivedAt == nil })
+            if target == nil { let recovered = CreativeProject(name: "恢复的创作"); projects.append(recovered); target = recovered }
+            restored.projectID = target?.id
+            if let draft = chatDrafts.removeValue(forKey: oldKey), let id = restored.projectID { chatDrafts[id.uuidString + ":" + restored.id.uuidString] = draft }
+        }
+        conversations.insert(restored, at: 0)
+        if restored.projectID == nil || projects.contains(where: { $0.id == restored.projectID && $0.archivedAt == nil }) {
+            selectedProjectID = restored.projectID
+            selectedConversationID = restored.id
+            requestStudio(.chat)
+        }
+        persist(); notice = "已恢复对话：\(restored.title)"; return true
+    }
     @Published var connection: ConnectionStatus = .offline
     @Published var modelHubStatus: ModelHubRuntimeStatus?
     @Published var billingGate: BillingGateStatus = .confirmationRequired
@@ -93,9 +115,31 @@ final class AppStore: ObservableObject {
     @Published var lastContextBudgetReport: ContextBudgetReport?
     @Published var isWorking = false
     @Published var notice: String?
-    @Published var chatDraft = ""
-    @Published var imagePromptDraft = ""
-    @Published var videoPromptDraft = ""
+    @Published private var chatDrafts: [String: String] = [:]
+    @Published private var imageDrafts: [String: ImageCreationDraft] = [:]
+    @Published private var videoDrafts: [String: VideoCreationDraft] = [:]
+    private var projectDraftKey: String { selectedProjectID?.uuidString ?? "unassigned" }
+    private var conversationDraftKey: String { projectDraftKey + ":" + (selectedConversationID?.uuidString ?? "new") }
+    var chatDraft: String {
+        get { chatDrafts[conversationDraftKey] ?? "" }
+        set { chatDrafts[conversationDraftKey] = newValue; persist() }
+    }
+    var imageDraft: ImageCreationDraft {
+        get { imageDrafts[projectDraftKey] ?? ImageCreationDraft() }
+        set { var draft = newValue; draft.updatedAt = Date(); imageDrafts[projectDraftKey] = draft; persist() }
+    }
+    var videoDraft: VideoCreationDraft {
+        get { videoDrafts[projectDraftKey] ?? VideoCreationDraft() }
+        set { var draft = newValue; draft.updatedAt = Date(); videoDrafts[projectDraftKey] = draft; persist() }
+    }
+    var imagePromptDraft: String {
+        get { imageDraft.prompt }
+        set { imageDraft.prompt = newValue }
+    }
+    var videoPromptDraft: String {
+        get { videoDraft.prompt }
+        set { videoDraft.prompt = newValue }
+    }
     @Published var showingSettings = false
     @Published var showingLibrary = false
     @Published var showingAssets = false
@@ -118,6 +162,9 @@ final class AppStore: ObservableObject {
     private let distributionProfile: AppDistributionProfile
     private let searchService = WebSearchService()
     private let notificationService = LocalNotificationService()
+    private var connectionMutationInProgress = false
+    private var connectionGeneration = UUID()
+    private var refreshGeneration = UUID()
     private var bootstrapped = false
     private var stateRevision = 0
     private var resourceRevision = 0
@@ -126,6 +173,7 @@ final class AppStore: ObservableObject {
     private var imageGenerationTasks: [UUID: Task<Void, Never>] = [:]
     private var videoGenerationTasks: [UUID: Task<Void, Never>] = [:]
     private var videoPollTasks: [UUID: Task<Void, Never>] = [:]
+    private var recoveryTasks: [UUID: Task<Void, Never>] = [:]
     private var selectableModelCache: [CreativeOperation: [ModelDescriptor]] = [:]
 
     init(
@@ -241,6 +289,10 @@ final class AppStore: ObservableObject {
                 storyboardBatchQueues = snapshot.storyboardBatchQueues ?? []
                 roughCuts = snapshot.roughCuts ?? []
                 thirdPartyAIConsentVersion = snapshot.thirdPartyAIConsentVersion
+                deletedConversations = snapshot.deletedConversations ?? []
+                chatDrafts = snapshot.chatDrafts ?? [:]
+                imageDrafts = snapshot.imageDrafts ?? [:]
+                videoDrafts = snapshot.videoDrafts ?? [:]
                 models = snapshot.cachedModels
                 capabilities = Dictionary(uniqueKeysWithValues: snapshot.cachedCapabilities.map { ($0.modelID, $0) })
                 customCapabilities = Dictionary(uniqueKeysWithValues: snapshot.customCapabilities.map { ($0.modelID, $0) })
@@ -329,11 +381,11 @@ final class AppStore: ObservableObject {
         let conversation = Conversation(title: "未命名创作", messages: [], projectID: selectedProjectID)
         conversations.insert(conversation, at: 0)
         selectedConversationID = conversation.id
-        mode = .chat
+        requestStudio(.chat)
         persist()
     }
 
-    func selectConversation(_ id: UUID) { selectedConversationID = id; mode = .chat; persist() }
+    func selectConversation(_ id: UUID) { selectedConversationID = id; requestStudio(.chat); persist() }
 
     func renameConversation(_ id: UUID, to title: String) {
         let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -342,6 +394,11 @@ final class AppStore: ObservableObject {
     }
 
     func deleteConversation(_ id: UUID) {
+        guard persistenceBlockReason == nil, chatTasks[id] == nil,
+              let removed = conversations.first(where: { $0.id == id }) else {
+            notice = "请先停止正在生成的对话后再删除。"; return
+        }
+        deletedConversations.append(removed)
         let wasSelected = selectedConversationID == id
         conversations.removeAll { $0.id == id }
         if wasSelected {
@@ -757,21 +814,26 @@ final class AppStore: ObservableObject {
     }
 
     func refreshModelHub(silent: Bool = false) async {
+        let selection = connectionGeneration
+        let refresh = UUID()
+        refreshGeneration = refresh
+        let providerID = selectedProviderID
         connection = .connecting
         modelHubStatus = nil
         do {
             let client = try activeProviderClient()
-            modelHubStatus = try await client.health()
+            let status = try await client.health()
+            guard selection == connectionGeneration, refresh == refreshGeneration, providerID == selectedProviderID else { return }
             let catalog = try await client.catalog()
+            guard selection == connectionGeneration, refresh == refreshGeneration, providerID == selectedProviderID else { return }
+            modelHubStatus = status
             applyCatalog(catalog)
             connection = .connected(catalog.models.count)
             billingGate = .confirmationRequired
-            if !silent {
-                let providerName = activeProvider?.displayName ?? "模型服务"
-                notice = "\(providerName) 已刷新：\(models.count) 个模型，\(models.count - unresolvedModels.count)/\(models.count) 已匹配。"
-            }
+            if !silent { notice = "\(activeProvider?.displayName ?? "模型服务") 已刷新：\(models.count) 个模型。" }
             persist()
         } catch {
+            guard selection == connectionGeneration, refresh == refreshGeneration, providerID == selectedProviderID else { return }
             connection = .failed(error.localizedDescription)
             handleModelHubError(error)
             if !silent { notice = error.localizedDescription }
@@ -816,6 +878,10 @@ final class AppStore: ObservableObject {
         apiKey proposedAPIKey: String,
         manualModelIDs: [String]
     ) async -> Bool {
+        guard !connectionMutationInProgress else { notice = "连接正在保存，请稍后重试。"; return false }
+        connectionMutationInProgress = true
+        connectionGeneration = UUID()
+        defer { connectionMutationInProgress = false }
         let cleanName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanName.isEmpty, cleanName.count <= 80 else {
             notice = "连接未保存：厂商名称需为 1–80 个字符。"
@@ -887,26 +953,70 @@ final class AppStore: ObservableObject {
     }
 
     func selectProvider(_ providerID: UUID) async {
+        guard !connectionMutationInProgress else { notice = "请等待连接保存完成再切换。"; return }
         guard let provider = providerConnections.first(where: { $0.id == providerID }) else { return }
+        let generation = UUID()
+        connectionGeneration = generation
+        connection = .connecting
+        var secret = await providerCredentialStore.readSecret(for: providerID)
+        guard connectionGeneration == generation else { return }
+        if secret.isEmpty, provider.id == AIProviderConfiguration.defaultModelHubID {
+            secret = await KeychainStore.readTokenAsync()
+        }
+        guard connectionGeneration == generation,
+              providerConnections.contains(where: { $0.id == providerID }) else { return }
         selectedProviderID = providerID
         baseURL = provider.baseURL
-        token = await providerCredentialStore.readSecret(for: providerID)
-        if token.isEmpty, provider.id == AIProviderConfiguration.defaultModelHubID {
-            token = await KeychainStore.readTokenAsync()
-        }
-        preferredChatModel = ""
-        preferredImageModel = ""
-        preferredVideoModel = ""
+        token = secret
+        models = []; capabilities = [:]; rebuildSelectableModelCache()
+        preferredChatModel = ""; preferredImageModel = ""; preferredVideoModel = ""
+        persist()
         await refreshModelHub()
+    }
+
+    func providerClient(for job: GenerationJob) async throws -> any ModelHubServicing {
+        guard let id = job.connectionID,
+              let current = providerConnections.first(where: { $0.id == id }) else {
+            throw VisionStackError.server("任务的原连接未确认或已移除。请先在任务详情绑定原厂商，不能使用当前连接代替。")
+        }
+        if let saved = job.connectionSnapshot, saved.kind != current.kind || saved.baseURL != current.baseURL {
+            throw VisionStackError.server("任务原连接地址已改变；请恢复原厂商地址后再恢复任务。")
+        }
+        // The active configuration and token are committed together, without suspension.
+        if selectedProviderID == id, baseURL == current.baseURL {
+            return try providerFactory(current, token)
+        }
+        var secret = await providerCredentialStore.readSecret(for: id)
+        if secret.isEmpty, id == AIProviderConfiguration.defaultModelHubID { secret = await KeychainStore.readTokenAsync() }
+        try Task.checkCancellation()
+        return try providerFactory(current, secret)
+    }
+
+    @discardableResult
+    func bindLegacyJob(_ jobID: UUID, to providerID: UUID) -> Bool {
+        guard let provider = providerConnections.first(where: { $0.id == providerID }) else { return false }
+        if let i = imageJobs.firstIndex(where: { $0.id == jobID && $0.connectionID == nil }) {
+            imageJobs[i].connectionID = providerID; imageJobs[i].connectionSnapshot = provider
+        } else if let i = videoJobs.firstIndex(where: { $0.id == jobID && $0.connectionID == nil }) {
+            videoJobs[i].connectionID = providerID; videoJobs[i].connectionSnapshot = provider
+        } else { return false }
+        persist(); return true
     }
 
     @discardableResult
     func removeProviderConnection(_ providerID: UUID) async -> Bool {
+        guard !connectionMutationInProgress else { notice = "请等待连接保存完成。"; return false }
+        connectionMutationInProgress = true
+        defer { connectionMutationInProgress = false }
         guard providerID != AIProviderConfiguration.defaultModelHubID else {
             notice = "内置 ModelHub 推荐连接不可删除，可切换到其他厂商连接。"
             return false
         }
         guard providerConnections.contains(where: { $0.id == providerID }) else { return false }
+        guard !(imageJobs + videoJobs).contains(where: { $0.connectionID == providerID && (!$0.state.isTerminal || $0.requiresArchiveRecovery) }) else {
+            notice = "该连接仍有关联的未完成任务，请先完成归档或对账。"; return false
+        }
+        connectionGeneration = UUID()
         do { try await providerCredentialStore.deleteSecret(for: providerID) }
         catch { notice = "连接未删除：\(error.localizedDescription)"; return false }
         providerConnections.removeAll { $0.id == providerID }
@@ -1028,8 +1138,11 @@ final class AppStore: ObservableObject {
 
     func refreshCapability(for modelID: String) async {
         guard connection.isConnected else { notice = "模型服务尚未连接。"; return }
+        let selection = connectionGeneration
+        let providerID = selectedProviderID
         do {
             let profile = try await activeProviderClient().capabilities(for: modelID)
+            guard selection == connectionGeneration, providerID == selectedProviderID else { return }
             if profile.isConfigured {
                 customCapabilities.removeValue(forKey: modelID)
                 capabilities[modelID] = profile
@@ -1039,6 +1152,7 @@ final class AppStore: ObservableObject {
                 notice = "当前连接没有为 \(modelID) 发布可执行能力；请确认后再建立本地档案。"
             }
         } catch {
+            guard selection == connectionGeneration, providerID == selectedProviderID else { return }
             handleModelHubError(error)
             notice = "能力读取失败：\(error.localizedDescription)"
         }
@@ -1126,8 +1240,9 @@ final class AppStore: ObservableObject {
     }
 
     private func performChat(prompt: String, conversationID: UUID, requestContext: BillableRequestContext) async {
-
         do {
+            let client = try activeProviderClient()
+            let model = preferredChatModel
             var sources: [ResearchSource] = []
             if webSearchEnabled {
                 let outcome = try await searchService.search(prompt)
@@ -1149,8 +1264,7 @@ final class AppStore: ObservableObject {
             if let conversation = conversations.first(where: { $0.id == conversationID }) {
                 let prepared = ContextBudget.prepare(systemPrompt: systemPrompt(), evidence: evidenceMessage, conversation: conversation.messages, maxInputTokens: contextBudgetTokens)
                 lastContextBudgetReport = prepared.report
-                let client = try activeProviderClient()
-                let reply = try await client.chat(model: preferredChatModel, messages: prepared.messages, requestContext: requestContext)
+                let reply = try await client.chat(model: model, messages: prepared.messages, requestContext: requestContext)
                 try Task.checkCancellation()
                 appendMessage(.init(role: .assistant, content: reply, sources: sources), to: conversationID)
             }
@@ -1224,7 +1338,8 @@ final class AppStore: ObservableObject {
         )
         let jobID = UUID()
         let requestContext = BillableRequestContext.new(confirmBillable: confirmBillable)
-        let job = GenerationJob(id: jobID, kind: .image, prompt: clean, model: resolvedModel, parameters: resolvedParameters, state: .running, progress: 0, parentJobID: parentJobID, batchID: batchID, versionIndex: versionIndex, referenceAssetID: resolvedReferences.first?.assetID, imageReferences: resolvedReferences, submissionState: .submitting, providerState: .notStarted, archiveState: .pending, clientRequestID: requestContext.clientRequestID, idempotencyKey: requestContext.idempotencyKey, retryGroupID: retryGroupID ?? jobID, projectID: selectedProjectID, agentStableID: promptPlan.agentStableID, skillStableIDs: promptPlan.skillStableIDs)
+        var job = GenerationJob(id: jobID, kind: .image, prompt: clean, model: resolvedModel, parameters: resolvedParameters, state: .running, progress: 0, parentJobID: parentJobID, batchID: batchID, versionIndex: versionIndex, referenceAssetID: resolvedReferences.first?.assetID, imageReferences: resolvedReferences, submissionState: .submitting, providerState: .notStarted, archiveState: .pending, clientRequestID: requestContext.clientRequestID, idempotencyKey: requestContext.idempotencyKey, retryGroupID: retryGroupID ?? jobID, projectID: selectedProjectID, agentStableID: promptPlan.agentStableID, skillStableIDs: promptPlan.skillStableIDs)
+        job.connectionID = activeProvider?.id; job.connectionSnapshot = activeProvider
         imageJobs.insert(job, at: 0); persist()
         let task = Task { [weak self] in
             guard let self else { return }
@@ -1299,6 +1414,7 @@ final class AppStore: ObservableObject {
         let requestContext = BillableRequestContext.new(confirmBillable: confirmBillable)
         var job = GenerationJob(id: jobID, kind: .video, prompt: clean, model: resolvedModel,
             parameters: resolvedParameters, state: .running, progress: 0, parentJobID: parentJobID, batchID: batchID, versionIndex: versionIndex, referenceAssetID: referenceAssetID, storyboardShotID: storyboardShotID, projectID: selectedProjectID)
+        job.connectionID = activeProvider?.id; job.connectionSnapshot = activeProvider
         job.retryGroupID = retryGroupID ?? jobID
         job.submissionState = .submitting; job.providerState = .notStarted; job.archiveState = .pending
         job.clientRequestID = requestContext.clientRequestID; job.idempotencyKey = requestContext.idempotencyKey
@@ -1337,7 +1453,7 @@ final class AppStore: ObservableObject {
         var job = initialJob
         do {
             let referenceImage = try await referencePayload(for: referenceAssetID, projectID: job.projectID)
-            let client = try activeProviderClient()
+            let client = try await providerClient(for: job)
             let response = try await client.generateVideo(model: job.model, prompt: providerPrompt, size: size, ratio: ratio, duration: duration, referenceImage: referenceImage, requestContext: requestContext)
             try Task.checkCancellation()
             job.submissionState = .submitted
@@ -1360,7 +1476,10 @@ final class AppStore: ObservableObject {
             }
         } catch {
             handleModelHubError(error)
-            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+            if (error is CancellationError || (error as? URLError)?.code == .cancelled), job.providerState == .succeeded {
+                job.state = .needsArchive; job.archiveState = .pending
+                job.errorMessage = "本机下载已停止，供应商结果已保留；稍后可继续保存。"
+            } else if error is CancellationError || (error as? URLError)?.code == .cancelled {
                 job.state = .cancelPending
                 job.submissionState = job.submissionState == .submitted ? .submitted : .unknown
                 job.providerState = .cancelPending
@@ -1381,6 +1500,9 @@ final class AppStore: ObservableObject {
         if job.requiresArchiveRecovery {
             return .unavailable("供应商结果已经存在，请先使用“存到本机”恢复归档，不能再次计费重试。")
         }
+        guard let source = job.connectionID else { return .unavailable("请先确认旧任务的原厂商。") }
+        guard source == selectedProviderID else { return .unavailable("请切换到任务的原厂商后重试，避免请求发往其他厂商。") }
+        guard job.projectID == selectedProjectID else { return .unavailable("请切换到任务所属项目后重试。") }
         guard connection.isConnected else { return .unavailable("当前模型服务尚未连接，不能重试。") }
         guard billingGate.allowsRequest else {
             return .unavailable(billingGate.detail ?? "余额或计费门控当前不可用。")
@@ -1492,12 +1614,18 @@ final class AppStore: ObservableObject {
 
     func storyboardBatchPreview(size: String, ratio: String) -> StoryboardBatchPreview {
         let shots = storyboardShots.filter { $0.projectID == selectedProjectID }
-        let known = currentProjectVideoJobs.compactMap { $0.cost.flatMap { $0.actualAmount ?? $0.estimatedAmount } }
-        let unitCost = known.isEmpty ? nil : known.reduce(Decimal.zero, +) / Decimal(known.count)
+        let costs = currentProjectVideoJobs.filter {
+            $0.connectionID == selectedProviderID && $0.model == preferredVideoModel
+                && $0.parameters["size"] == size && $0.parameters["aspect_ratio"] == ratio
+        }.compactMap(\.cost).filter { $0.actualAmount != nil || $0.estimatedAmount != nil }
+        let currencies = Set(costs.map { $0.currency.uppercased() })
+        let known = costs.compactMap { $0.actualAmount ?? $0.estimatedAmount }
+        let unitCost = known.isEmpty || currencies.count != 1 ? nil : known.reduce(Decimal.zero, +) / Decimal(known.count)
         return StoryboardBatchPlanner.preview(
             shots: shots,
             availableSlots: max(0, maxConcurrentGenerationTasks - activeGenerationCount),
-            knownCostPerRequest: unitCost
+            knownCostPerRequest: unitCost,
+            currency: currencies.count == 1 ? currencies.first : nil
         )
     }
 
@@ -1648,6 +1776,8 @@ final class AppStore: ObservableObject {
         imageJobs.filter { $0.effectiveImageReferences.contains(where: { $0.assetID == id }) }.count
             + videoJobs.filter { $0.referenceAssetID == id }.count
             + storyboardShots.filter { $0.referenceAssetID == id }.count
+            + imageDrafts.values.filter { [$0.referenceAssetID, $0.identityReferenceAssetID, $0.photographyReferenceAssetID].contains(id) }.count
+            + videoDrafts.values.filter { $0.referenceAssetID == id }.count
     }
 
     func runMediaHealthCheck() async {
@@ -1751,6 +1881,7 @@ final class AppStore: ObservableObject {
     }
 
     func cancelImageJob(_ id: UUID) async {
+        if imageJobs.first(where: { $0.id == id })?.archiveState == .downloading { await cancelArchiveJob(id); return }
         guard var job = imageJobs.first(where: { $0.id == id }), job.state.isActivelyExecuting else { return }
         if let task = imageGenerationTasks[id] {
             task.cancel()
@@ -1768,6 +1899,7 @@ final class AppStore: ObservableObject {
     }
 
     func cancelVideoJob(_ id: UUID) async {
+        if videoJobs.first(where: { $0.id == id })?.archiveState == .downloading { await cancelArchiveJob(id); return }
         if let task = videoGenerationTasks[id] {
             task.cancel()
             await task.value
@@ -1777,15 +1909,15 @@ final class AppStore: ObservableObject {
         guard var job = videoJobs.first(where: { $0.id == id }), !job.state.isTerminal else { return }
         if let taskID = job.taskID {
             do {
-                let client = try activeProviderClient()
+                let client = try await providerClient(for: job)
                 try await client.cancelVideoTask(model: job.model, taskID: taskID)
                 job.state = .cancelled
                 job.providerState = .cancelled
-                job.errorMessage = "已向 ModelHub 发送上游取消请求。"
+                job.errorMessage = "供应商已确认上游取消请求。"
             } catch {
                 job.state = .cancelPending
                 job.providerState = .cancelPending
-                job.errorMessage = "本地轮询已停止，但 ModelHub 未确认上游取消：\(error.localizedDescription)"
+                job.errorMessage = "本地轮询已停止，但供应商未确认上游取消：\(error.localizedDescription)"
             }
         } else {
             job.state = .cancelPending
@@ -1820,7 +1952,30 @@ final class AppStore: ObservableObject {
         persist()
     }
 
+    /// Cancels only local work once the provider has produced a result. The
+    /// remote URLs remain available for a later download, without regeneration.
+    func cancelArchiveJob(_ id: UUID) async {
+        guard let original = allJobs.first(where: { $0.id == id }), original.archiveState == .downloading else { return }
+        let tasks = [imageGenerationTasks[id], videoGenerationTasks[id], videoPollTasks[id], recoveryTasks[id]].compactMap { $0 }
+        tasks.forEach { $0.cancel() }
+        for task in tasks { await task.value }
+        guard var job = allJobs.first(where: { $0.id == id }), job.archiveState != .succeeded else { return }
+        job.state = .needsArchive; job.providerState = .succeeded; job.archiveState = .pending
+        job.errorMessage = "已停止本机下载；供应商结果已保留，可稍后重新存到本机，不会重新生成。"
+        job.updatedAt = Date()
+        if job.kind == .image { replaceImageJob(job) } else { replaceVideoJob(job) }
+    }
+
     func archiveRemoteResults(for job: GenerationJob) async {
+        guard recoveryTasks[job.id] == nil,
+              let current = allJobs.first(where: { $0.id == job.id }), current.archiveState != .downloading else { return }
+        let task = Task { await self.performArchiveRemoteResults(for: current) }
+        recoveryTasks[job.id] = task
+        await task.value
+        recoveryTasks[job.id] = nil
+    }
+
+    private func performArchiveRemoteResults(for job: GenerationJob) async {
         let remote = Array(Set((job.remoteResultURLs ?? []) + job.resultURLs.filter { $0.hasPrefix("http://") || $0.hasPrefix("https://") }))
         guard !remote.isEmpty else { notice = "该任务没有可下载的远程结果。"; return }
         var updated = job
@@ -1834,6 +1989,7 @@ final class AppStore: ObservableObject {
             let local = try await persistence.archiveMedia(remote, kind: job.kind) { [weak self] progress in
                 Task { @MainActor in self?.updateProgress(jobID: job.id, kind: job.kind, progress: progress) }
             }
+            try Task.checkCancellation()
             updated.remoteResultURLs = nil
             updated.resultURLs = local
             updated.progress = 1
@@ -1843,6 +1999,7 @@ final class AppStore: ObservableObject {
             updated.updatedAt = Date()
             if job.kind == .image { replaceImageJob(updated) } else { replaceVideoJob(updated) }
         } catch {
+            if Task.isCancelled { return }
             updated.archiveState = .failed
             updated.state = .needsArchive
             updated.errorMessage = "供应商已完成，本地归档仍失败：\(error.localizedDescription)"
@@ -1853,12 +2010,21 @@ final class AppStore: ObservableObject {
     }
 
     func reconcileJob(_ job: GenerationJob) async {
+        guard recoveryTasks[job.id] == nil,
+              let current = allJobs.first(where: { $0.id == job.id }), current.archiveState != .downloading else { return }
+        let task = Task { await self.performReconcileJob(current) }
+        recoveryTasks[job.id] = task
+        await task.value
+        recoveryTasks[job.id] = nil
+    }
+
+    private func performReconcileJob(_ job: GenerationJob) async {
         guard job.state.requiresReconciliation || job.state == .needsArchive else {
             notice = "该任务当前不需要对账。"
             return
         }
         do {
-            let client = try activeProviderClient()
+            let client = try await providerClient(for: job)
             let result: ParsedGenerationResponse
             if job.kind == .video, let taskID = job.taskID {
                 result = try await client.videoTask(model: job.model, taskID: taskID)
@@ -1869,6 +2035,7 @@ final class AppStore: ObservableObject {
                 return
             }
 
+            try Task.checkCancellation()
             guard var updated = (job.kind == .image ? imageJobs : videoJobs).first(where: { $0.id == job.id }) else { return }
             updated.lastReconciledAt = Date()
             updated.rawResponse = ModelHubResponseParser.diagnosticSummary(from: result.raw)
@@ -1888,7 +2055,7 @@ final class AppStore: ObservableObject {
                     updated.submissionState = .submitted
                     updated.providerState = .unknown
                     updated.archiveState = .pending
-                    updated.errorMessage = "ModelHub 报告成功，但没有返回媒体结果；请稍后再次对账。"
+                    updated.errorMessage = "供应商报告成功，但没有返回媒体结果；请稍后再次对账。"
                     updated.updatedAt = Date()
                     if job.kind == .image { replaceImageJob(updated) } else { replaceVideoJob(updated) }
                     return
@@ -1902,12 +2069,14 @@ final class AppStore: ObservableObject {
                     updated.resultURLs = try await persistence.archiveMedia(remoteResults, kind: job.kind) { [weak self] progress in
                         Task { @MainActor in self?.updateProgress(jobID: job.id, kind: job.kind, progress: progress) }
                     }
+                    try Task.checkCancellation()
                     updated.archiveState = .succeeded
                     updated.state = .succeeded
                     updated.progress = 1
                     updated.remoteResultURLs = nil
                     updated.errorMessage = nil
                 } catch {
+                    if Task.isCancelled { return }
                     updated.archiveState = .failed
                     updated.state = .needsArchive
                     updated.errorMessage = "供应商已完成，本地归档仍失败：\(error.localizedDescription)"
@@ -1922,6 +2091,7 @@ final class AppStore: ObservableObject {
             updated.updatedAt = Date()
             if job.kind == .image { replaceImageJob(updated) } else { replaceVideoJob(updated) }
         } catch {
+            if Task.isCancelled { return }
             if case VisionStackError.httpStatus(let statusCode, _) = error,
                statusCode == 404,
                job.state == .submissionUnknown,
@@ -2294,7 +2464,7 @@ final class AppStore: ObservableObject {
         var job = initialJob
         do {
             let referenceImages = try await referencePayloads(for: imageReferences, projectID: job.projectID)
-            let client = try activeProviderClient()
+            let client = try await providerClient(for: job)
             let response = try await client.generateImage(
                 model: job.model,
                 prompt: providerPrompt,
@@ -2332,7 +2502,10 @@ final class AppStore: ObservableObject {
             job.errorMessage = nil
         } catch {
             handleModelHubError(error)
-            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+            if (error is CancellationError || (error as? URLError)?.code == .cancelled), job.providerState == .succeeded {
+                job.state = .needsArchive; job.archiveState = .pending
+                job.errorMessage = "本机下载已停止，供应商结果已保留；稍后可继续保存。"
+            } else if error is CancellationError || (error as? URLError)?.code == .cancelled {
                 job.state = .cancelPending
                 job.submissionState = job.submissionState == .submitted ? .submitted : .unknown
                 job.providerState = .cancelPending
@@ -2487,15 +2660,17 @@ final class AppStore: ObservableObject {
 
     private func pollVideoJob(_ id: UUID) {
         videoPollTasks[id]?.cancel()
-        videoPollTasks[id] = Task {
+        videoPollTasks[id] = Task { [weak self] in
+            guard let self else { return }
             var consecutiveErrors = 0; var lastError: String?
             for _ in 0..<120 {
                 do { try await Task.sleep(for: videoPollInterval) } catch { return }
                 guard !Task.isCancelled, var job = videoJobs.first(where: { $0.id == id }),
                       !job.state.isTerminal, let taskID = job.taskID else { return }
                 do {
-                    let client = try activeProviderClient()
+                    let client = try await providerClient(for: job)
                     let result = try await client.videoTask(model: job.model, taskID: taskID)
+                    try Task.checkCancellation()
                     consecutiveErrors = 0
                     job.rawResponse = ModelHubResponseParser.diagnosticSummary(from: result.raw); job.remoteResultURLs = result.mediaURLs; if let cost = result.cost { job.cost = cost }; job.updatedAt = Date()
                     if result.state == .failed || result.state == .cancelled {
@@ -2503,7 +2678,7 @@ final class AppStore: ObservableObject {
                         job.submissionState = .submitted
                         job.providerState = result.state == .cancelled ? .cancelled : .failed
                         job.archiveState = .notRequired
-                        job.errorMessage = result.errorMessage ?? "ModelHub 报告任务失败。"
+                        job.errorMessage = result.errorMessage ?? "供应商报告任务失败。"
                         replaceVideoJob(job); videoPollTasks[id] = nil; return
                     }
                     if result.state == .succeeded || !result.mediaURLs.isEmpty {
@@ -2512,7 +2687,7 @@ final class AppStore: ObservableObject {
                             job.submissionState = .submitted
                             job.providerState = .unknown
                             job.archiveState = .pending
-                            job.errorMessage = "ModelHub 报告成功，但没有返回媒体结果；请稍后对账。"
+                            job.errorMessage = "供应商报告成功，但没有返回媒体结果；请稍后对账。"
                             replaceVideoJob(job); videoPollTasks[id] = nil; return
                         }
                         job.submissionState = .submitted
@@ -2525,9 +2700,11 @@ final class AppStore: ObservableObject {
                             job.resultURLs = try await persistence.archiveMedia(result.mediaURLs, kind: .video) { [weak self] progress in
                                 Task { @MainActor in self?.updateProgress(jobID: progressJobID, kind: .video, progress: progress) }
                             }
+                            try Task.checkCancellation()
                             job.archiveState = .succeeded; job.state = .succeeded; job.progress = 1; job.remoteResultURLs = nil; job.errorMessage = nil
                         }
                         catch {
+                            if Task.isCancelled { return }
                             job.archiveState = .failed
                             job.state = .needsArchive
                             job.errorMessage = "供应商已完成，本地归档仍失败：\(error.localizedDescription)"
@@ -2539,6 +2716,7 @@ final class AppStore: ObservableObject {
                     job.state = result.state == .queued ? .queued : .running
                     replaceVideoJob(job)
                 } catch {
+                    if Task.isCancelled { return }
                     consecutiveErrors += 1; lastError = error.localizedDescription
                     if consecutiveErrors >= 3 {
                         job.state = .pollingDegraded
@@ -2638,7 +2816,8 @@ final class AppStore: ObservableObject {
             completionNotificationsEnabled: completionNotificationsEnabled,
             versionReviews: versionReviews, creativePresets: creativePresets,
             storyboardBatchQueues: storyboardBatchQueues, roughCuts: roughCuts,
-            thirdPartyAIConsentVersion: thirdPartyAIConsentVersion)
+            thirdPartyAIConsentVersion: thirdPartyAIConsentVersion,
+            deletedConversations: deletedConversations, chatDrafts: chatDrafts, imageDrafts: imageDrafts, videoDrafts: videoDrafts)
     }
 
     private func nextStateRevision() -> Int { stateRevision += 1; return stateRevision }

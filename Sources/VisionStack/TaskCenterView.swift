@@ -1,11 +1,18 @@
 import SwiftUI
 
 struct TaskCenterView: View {
+    var embedded = false
+    var onShowAsset: ((UUID) -> Void)? = nil
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
-    @State private var query = ""
-    @State private var kind = "全部"
-    @State private var state = "全部"
+    @EnvironmentObject private var navigation: WorkspaceNavigation
+    private var query: String { navigation.taskQuery }
+    private var kind: String { navigation.taskKind }
+    private var state: String { navigation.taskState }
+    private var page: Int {
+        get { navigation.taskPage }
+        nonmutating set { navigation.taskPage = newValue }
+    }
 
     private var jobs: [GenerationJob] {
         store.currentProjectJobs.filter { job in
@@ -21,7 +28,8 @@ struct TaskCenterView: View {
             return matchesKind && matchesState && (query.isEmpty || haystack.localizedCaseInsensitiveContains(query))
         }
     }
-    private var ledger: ProjectCostSummary { store.currentProjectCostSummary }
+    private var costTotals: [CurrencyCostTotal] { CostPresentation.totals(store.currentProjectJobs.map(\.cost)) }
+    private var unknownCostCount: Int { store.currentProjectJobs.filter { $0.cost?.actualAmount == nil && $0.cost?.estimatedAmount == nil }.count }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,34 +41,39 @@ struct TaskCenterView: View {
                 Spacer()
                 StatusPill(title: "\(store.currentProjectActiveGenerationCount) 个活动", color: store.currentProjectActiveGenerationCount == 0 ? VSColor.moss : VSColor.orange)
                 Text("\(jobs.count) / \(store.currentProjectJobs.count)").font(.vsLabel(11)).foregroundStyle(VSColor.muted)
-                Button("关闭") { dismiss() }
+                if !embedded { Button("关闭") { dismiss() } }
             }.padding(22)
             Divider()
             HStack(spacing: 12) {
-                TextField("搜索提示词、模型、任务号或错误", text: $query).textFieldStyle(.roundedBorder)
-                Picker("类型", selection: $kind) { ForEach(["全部", "图片", "视频"], id: \.self) { Text($0).tag($0) } }.frame(width: 100)
-                Picker("状态", selection: $state) { ForEach(["全部", "活动", "待处理", "失败", "完成"], id: \.self) { Text($0).tag($0) } }.frame(width: 110)
+                TextField("搜索提示词、模型、任务号或错误", text: $navigation.taskQuery).textFieldStyle(.roundedBorder)
+                Picker("类型", selection: $navigation.taskKind) { ForEach(["全部", "图片", "视频"], id: \.self) { Text($0).tag($0) } }.frame(width: 100)
+                Picker("状态", selection: $navigation.taskState) { ForEach(["全部", "活动", "待处理", "失败", "完成"], id: \.self) { Text($0).tag($0) } }.frame(width: 110)
             }.padding(16)
-            HStack(spacing: 10) {
-                ledgerMetric("费用台账", "\(ledger.currency) \(NSDecimalNumber(decimal: ledger.knownTotal).stringValue)", "已知金额")
-                ledgerMetric("已知记录", "\(ledger.knownCount)", "其中 \(ledger.providerReportedCount) 项供应商回报")
-                ledgerMetric("金额未知", "\(ledger.unknownCount)", "不会把未知金额记作 0")
-                ledgerMetric("任务总数", "\(store.currentProjectJobs.count)", "图片与视频统一核算")
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
+            ScrollView(.horizontal) {
+                HStack(spacing: 10) {
+                    ForEach(costTotals) { total in
+                        ledgerMetric(total.currency, "实际 \(CostPresentation.amount(total.actual))", "\(total.actualCount) 项实际 · 预计 \(CostPresentation.amount(total.estimated))（\(total.estimatedCount) 项）")
+                    }
+                    ledgerMetric("金额未知", "\(unknownCostCount) 项", "未知不计为零；各币种独立汇总")
+                }.padding(.horizontal, 16)
+            }.padding(.bottom, 12)
             if jobs.isEmpty {
                 EmptyStudioState(symbol: "checkmark.circle", title: "没有符合条件的任务", detail: "任务记录与成功素材分开管理；这里保留失败、对账和诊断信息。")
             } else {
-                List(jobs) { job in TaskCenterRow(job: job) }.scrollContentBackground(.hidden)
+                List(WorkspacePagination.page(jobs, number: page)) { job in TaskCenterRow(job: job, onShowAsset: onShowAsset) }.scrollContentBackground(.hidden)
             }
+            WorkspacePageControls(page: $navigation.taskPage, count: jobs.count)
             HStack {
                 Image(systemName: "shield.checkered")
                 Text("未知提交、查询中断和取消待确认不会直接计费重试；请先使用“对账”。")
                 Spacer()
             }.font(.vsBody(11)).foregroundStyle(VSColor.muted).padding(14)
         }
-        .frame(minWidth: 1020, minHeight: 700)
+        .frame(minWidth: embedded ? 0 : 1020, minHeight: embedded ? 0 : 700)
+        .onChange(of: query) { page = 0 }
+        .onChange(of: kind) { page = 0 }
+        .onChange(of: state) { page = 0 }
+        .onChange(of: jobs.count) { page = min(page, WorkspacePagination.lastPage(count: jobs.count)) }
         .background(PaperBackground())
     }
 
@@ -81,6 +94,7 @@ struct TaskCenterView: View {
 private struct TaskCenterRow: View {
     @EnvironmentObject private var store: AppStore
     let job: GenerationJob
+    var onShowAsset: ((UUID) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -95,6 +109,17 @@ private struct TaskCenterRow: View {
                         .font(.vsBody(10)).foregroundStyle(VSColor.muted)
                 }
                 Spacer()
+                if job.state == .succeeded, let onShowAsset {
+                    Button("查看素材") { onShowAsset(job.id) }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("查看素材：\(job.prompt)")
+                }
+                if job.archiveState == .downloading {
+                    Button("停止下载") { Task { await store.cancelArchiveJob(job.id) } }
+                        .buttonStyle(.borderless)
+                        .help("仅停止本机下载，保留供应商已完成结果")
+                        .accessibilityLabel("停止下载：\(job.prompt)")
+                }
                 MediaResultActions(
                     job: job,
                     onRetry: { Task { if job.kind == .image { await store.retryImageJob(job, confirmBillable: true) } else { await store.retryVideoJob(job, confirmBillable: true) } } },
@@ -102,18 +127,29 @@ private struct TaskCenterRow: View {
                     onDelete: { Task { if job.kind == .image { await store.deleteImageJob(job) } else { await store.deleteVideoJob(job) } } }
                 ).frame(minWidth: 300)
             }
+            if job.connectionID == nil {
+                HStack {
+                    Menu("确认任务原厂商") {
+                        ForEach(store.providerConnections) { provider in
+                            Button(provider.displayName) { _ = store.bindLegacyJob(job.id, to: provider.id) }
+                        }
+                    }
+                    Text("请按原任务来源选择；仅绑定来源，不重发或计费。").font(.vsBody(10)).foregroundStyle(VSColor.muted)
+                }
+            }
             HStack(spacing: 12) {
-                stage("提交", job.submissionState?.rawValue ?? "legacy")
-                stage("供应商", job.providerState?.rawValue ?? "legacy")
-                stage("归档", job.archiveState?.rawValue ?? "legacy")
+                stage("提交", job.submissionState?.displayTitle ?? "历史记录")
+                stage("供应商", job.providerState?.displayTitle ?? "历史记录")
+                stage("归档", job.archiveState?.displayTitle ?? "历史记录")
                 if let taskID = job.taskID { Text("任务号 \(taskID)").textSelection(.enabled) }
                 if let requestID = job.clientRequestID { Text("请求号 \(requestID.uuidString.prefix(8))").textSelection(.enabled) }
-                Text(job.cost.flatMap { $0.actualAmount ?? $0.estimatedAmount }.map { "费用 ¥\(NSDecimalNumber(decimal: $0).stringValue)" } ?? "费用金额未知")
+                Text(CostPresentation.label(job.cost))
             }.font(.vsBody(9)).foregroundStyle(VSColor.muted)
             if let error = job.errorMessage, !error.isEmpty {
                 Text(error).font(.vsBody(10)).foregroundStyle(VSColor.vermilion).textSelection(.enabled)
             }
         }.padding(.vertical, 7)
+        .accessibilityElement(children: .contain)
     }
 
     private func stage(_ title: String, _ value: String) -> some View { Text("\(title)：\(value)") }

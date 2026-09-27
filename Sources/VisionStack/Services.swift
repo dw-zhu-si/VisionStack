@@ -84,7 +84,13 @@ actor PersistenceService {
     private var latestResourceRevision = 0
     private let removesRootOnDeinit: Bool
 
-    init(root customRoot: URL? = nil) {
+    typealias MediaDownloader = @Sendable (URLRequest, Int64, (@Sendable (Double) -> Void)?) async throws -> (URL, HTTPURLResponse)
+    private let mediaDownloader: MediaDownloader
+
+    init(root customRoot: URL? = nil, mediaDownloader: @escaping MediaDownloader = { request, limit, progress in
+        try await PublicHTTPTransport.download(request, maximumBytes: limit) { progress?($0) }
+    }) {
+        self.mediaDownloader = mediaDownloader
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         if let customRoot {
             root = customRoot
@@ -112,13 +118,14 @@ actor PersistenceService {
 
     func load() throws -> PersistenceLoad {
         try ensureDirectories()
-        guard FileManager.default.fileExists(atPath: stateURL.path) else {
-            return PersistenceLoad(snapshot: nil, resources: loadResources(), recoveryNotice: nil, migratedLegacyState: false)
+        guard FileManager.default.fileExists(atPath: stateURL.path) || FileManager.default.fileExists(atPath: stateBackupURL.path) else {
+            return PersistenceLoad(snapshot: nil, resources: try loadResources(), recoveryNotice: nil, migratedLegacyState: false)
         }
-        let data = try Data(contentsOf: stateURL)
+        // An unreadable/missing primary is recoverable just like a malformed primary.
+        let data = (try? Data(contentsOf: stateURL)) ?? Data()
         if let snapshot = try? JSONDecoder.visionStack.decode(AppSnapshot.self, from: data) {
             guard snapshot.schemaVersion <= AppSnapshot.currentSchemaVersion else { throw VisionStackError.unsupportedSchema(snapshot.schemaVersion) }
-            return PersistenceLoad(snapshot: snapshot, resources: loadResources(), recoveryNotice: nil, migratedLegacyState: false)
+            return PersistenceLoad(snapshot: snapshot, resources: try loadResources(), recoveryNotice: nil, migratedLegacyState: false)
         }
         if let legacy = try? JSONDecoder.visionStack.decode(LegacyAppSnapshot.self, from: data) {
             let snapshot = AppSnapshot(
@@ -134,21 +141,30 @@ actor PersistenceService {
         }
         if let backupData = try? Data(contentsOf: stateBackupURL),
            let backup = try? JSONDecoder.visionStack.decode(AppSnapshot.self, from: backupData) {
-            return PersistenceLoad(snapshot: backup, resources: loadResources(), recoveryNotice: "主历史文件无法读取，已从最近备份恢复；损坏文件未被删除。", migratedLegacyState: false)
+            guard backup.schemaVersion <= AppSnapshot.currentSchemaVersion else { throw VisionStackError.unsupportedSchema(backup.schemaVersion) }
+            return PersistenceLoad(snapshot: backup, resources: try loadResources(), recoveryNotice: "主历史文件无法读取，已从最近备份恢复；损坏文件未被删除。", migratedLegacyState: false)
         }
         throw VisionStackError.server("本地历史无法解码，应用已保留原文件且不会覆盖。")
     }
 
     func saveState(_ snapshot: AppSnapshot, revision: Int) throws {
         guard revision >= latestStateRevision else { return }
-        try ensureDirectories(); try backup(stateURL, to: stateBackupURL)
-        try secureWrite(JSONEncoder.visionStack.encode(SnapshotSanitizer.sanitized(snapshot)), to: stateURL)
+        try ensureDirectories()
+        let encoded = try JSONEncoder.visionStack.encode(SnapshotSanitizer.sanitized(snapshot))
+        if let previous = try? Data(contentsOf: stateURL), Self.isRecoverableState(previous) {
+            try secureWrite(previous, to: stateBackupURL)
+        }
+        try secureWrite(encoded, to: stateURL)
         latestStateRevision = revision
     }
 
     func saveResources(_ resources: [ImportedResource], revision: Int) throws {
         guard revision >= latestResourceRevision else { return }
-        try ensureDirectories(); try backup(resourcesURL, to: resourcesBackupURL)
+        try ensureDirectories()
+        if let previous = try? Data(contentsOf: resourcesURL),
+           (try? JSONDecoder.visionStack.decode([ImportedResource].self, from: previous)) != nil {
+            try secureWrite(previous, to: resourcesBackupURL)
+        }
         try secureWrite(JSONEncoder.visionStack.encode(resources), to: resourcesURL)
         latestResourceRevision = revision
     }
@@ -163,6 +179,7 @@ actor PersistenceService {
         let totalItems = max(values.count, 1)
         do {
             for (index, value) in values.enumerated() {
+            try Task.checkCancellation()
             if value.hasPrefix("data:") {
                 guard let comma = value.firstIndex(of: ",") else {
                     throw VisionStackError.mediaArchiveFailed("生成结果中的 Base64 数据无效。")
@@ -184,26 +201,11 @@ actor PersistenceService {
             }
             var request = URLRequest(url: url, timeoutInterval: kind == .video ? 600 : 120)
             request.setValue("VisionStack/0.2", forHTTPHeaderField: "User-Agent")
-            let checkpointURL = downloadsURL.appending(path: Self.downloadCheckpointName(for: value))
-            let resumeData = try? Data(contentsOf: checkpointURL)
-            let downloader = ProgressiveMediaDownloader(maximumBytes: MediaArchivePolicy.maximumRemoteBytes(for: kind)) { itemProgress in
+            let (temporaryURL, http) = try await mediaDownloader(request, MediaArchivePolicy.maximumRemoteBytes(for: kind)) { itemProgress in
                 progress?((Double(index) + itemProgress) / Double(totalItems))
             }
-            let temporaryURL: URL
-            let http: HTTPURLResponse
-            do {
-                (temporaryURL, http) = try await downloader.download(request, resumeData: resumeData)
-                if FileManager.default.fileExists(atPath: checkpointURL.path) { try? FileManager.default.removeItem(at: checkpointURL) }
-            } catch let failure as ResumableDownloadFailure {
-                try secureWrite(failure.resumeData, to: checkpointURL)
-                throw failure.underlying
-            } catch {
-                if resumeData != nil, FileManager.default.fileExists(atPath: checkpointURL.path) {
-                    try? FileManager.default.removeItem(at: checkpointURL)
-                }
-                throw error
-            }
             defer { try? FileManager.default.removeItem(at: temporaryURL) }
+            try Task.checkCancellation()
             guard (200..<300).contains(http.statusCode) else {
                 throw VisionStackError.mediaArchiveFailed("生成已完成，但媒体下载失败。")
             }
@@ -219,6 +221,7 @@ actor PersistenceService {
             archived.append(try saveDownloadedFile(at: temporaryURL, kind: kind, mimeType: mime, suggestedExtension: url.pathExtension))
             progress?(Double(index + 1) / Double(totalItems))
             }
+            try Task.checkCancellation()
         } catch {
             deleteArchivedMedia(archived)
             throw error
@@ -383,11 +386,22 @@ actor PersistenceService {
         return resolvedURL
     }
 
-    private func loadResources() -> [ImportedResource] {
-        guard let data = try? Data(contentsOf: resourcesURL) else { return [] }
-        if let resources = try? JSONDecoder.visionStack.decode([ImportedResource].self, from: data) { return resources }
-        guard let backup = try? Data(contentsOf: resourcesBackupURL) else { return [] }
-        return (try? JSONDecoder.visionStack.decode([ImportedResource].self, from: backup)) ?? []
+    private static func isRecoverableState(_ data: Data) -> Bool {
+        if let snapshot = try? JSONDecoder.visionStack.decode(AppSnapshot.self, from: data) {
+            return snapshot.schemaVersion <= AppSnapshot.currentSchemaVersion
+        }
+        return (try? JSONDecoder.visionStack.decode(LegacyAppSnapshot.self, from: data)) != nil
+    }
+
+    private func loadResources() throws -> [ImportedResource] {
+        if let data = try? Data(contentsOf: resourcesURL),
+           let resources = try? JSONDecoder.visionStack.decode([ImportedResource].self, from: data) { return resources }
+        if let backup = try? Data(contentsOf: resourcesBackupURL),
+           let resources = try? JSONDecoder.visionStack.decode([ImportedResource].self, from: backup) { return resources }
+        if FileManager.default.fileExists(atPath: resourcesURL.path) || FileManager.default.fileExists(atPath: resourcesBackupURL.path) {
+            throw VisionStackError.server("资源库及其备份无法读取，已保留原文件并暂停保存。")
+        }
+        return []
     }
 
     private func saveMediaData(_ data: Data, kind: GenerationKind, mimeType: String?, suggestedExtension: String = "") throws -> String {
@@ -426,12 +440,6 @@ actor PersistenceService {
         try FileManager.default.createDirectory(at: mediaURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try FileManager.default.createDirectory(at: referencesURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try FileManager.default.createDirectory(at: downloadsURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-    }
-
-    private func backup(_ source: URL, to destination: URL) throws {
-        guard FileManager.default.fileExists(atPath: source.path) else { return }
-        if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
-        try FileManager.default.copyItem(at: source, to: destination)
     }
 
     private func secureWrite(_ data: Data, to url: URL) throws {
@@ -625,7 +633,7 @@ actor ModelHubClient: ModelHubServicing {
             request.setValue(requestContext.clientRequestID.uuidString, forHTTPHeaderField: "X-Client-Request-ID")
         }
         if let body { request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try JSONSerialization.data(withJSONObject: body) }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await BoundedHTTPTransport.data(for: request, maximumBytes: 64 * 1_024 * 1_024)
         guard let http = response as? HTTPURLResponse else { throw VisionStackError.invalidResponse() }
         let json = (try? JSONSerialization.jsonObject(with: data)) ?? ["raw": String(data: data, encoding: .utf8) ?? ""]
         guard (200..<300).contains(http.statusCode) else {
@@ -891,101 +899,6 @@ enum ContextBudget {
     }
 }
 
-private struct ResumableDownloadFailure: Error, @unchecked Sendable {
-    let resumeData: Data
-    let underlying: Error
-}
-
-private final class ProgressiveMediaDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    private let progress: @Sendable (Double) -> Void
-    private let maximumBytes: Int64
-    private var continuation: CheckedContinuation<(URL, HTTPURLResponse), Error>?
-    private var downloadedURL: URL?
-    private var response: HTTPURLResponse?
-    private var session: URLSession?
-    private var policyError: Error?
-
-    init(maximumBytes: Int64, progress: @escaping @Sendable (Double) -> Void) {
-        self.maximumBytes = maximumBytes
-        self.progress = progress
-    }
-
-    func download(_ request: URLRequest, resumeData: Data?) async throws -> (URL, HTTPURLResponse) {
-        try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
-            let queue = OperationQueue()
-            queue.maxConcurrentOperationCount = 1
-            let session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: queue)
-            self.session = session
-            if let resumeData, !resumeData.isEmpty { session.downloadTask(withResumeData: resumeData).resume() }
-            else { session.downloadTask(with: request).resume() }
-        }
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        if totalBytesWritten > maximumBytes || totalBytesExpectedToWrite > maximumBytes {
-            policyError = VisionStackError.mediaArchiveFailed("媒体下载超过本地归档上限，已提前停止。")
-            downloadTask.cancel()
-            return
-        }
-        guard totalBytesExpectedToWrite > 0 else { return }
-        progress(min(1, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)))
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
-    ) {
-        guard let url = request.url, MediaURLPolicy.isAllowedRemoteURL(url) else {
-            policyError = VisionStackError.mediaArchiveFailed("媒体重定向目标未通过 HTTPS 与私网边界检查。")
-            completionHandler(nil)
-            return
-        }
-        completionHandler(request)
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        do {
-            let owned = FileManager.default.temporaryDirectory.appending(path: "visionstack-download-\(UUID().uuidString)")
-            try FileManager.default.copyItem(at: location, to: owned)
-            downloadedURL = owned
-            response = downloadTask.response as? HTTPURLResponse
-        } catch {
-            continuation?.resume(throwing: error)
-            continuation = nil
-        }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        defer { self.session?.finishTasksAndInvalidate(); self.session = nil }
-        guard let continuation else { return }
-        self.continuation = nil
-        if let policyError {
-            continuation.resume(throwing: policyError)
-        } else if let error {
-            let nsError = error as NSError
-            if let resumeData = nsError.userInfo["NSURLSessionDownloadTaskResumeData"] as? Data, !resumeData.isEmpty {
-                continuation.resume(throwing: ResumableDownloadFailure(resumeData: resumeData, underlying: error))
-            } else {
-                continuation.resume(throwing: error)
-            }
-        } else if let downloadedURL, let response {
-            continuation.resume(returning: (downloadedURL, response))
-        } else {
-            continuation.resume(throwing: VisionStackError.mediaArchiveFailed("下载完成但临时文件不可用。"))
-        }
-    }
-}
-
 actor WebSearchService {
     func search(_ query: String) async throws -> SearchOutcome {
         guard var components = URLComponents(string: "https://html.duckduckgo.com/html/") else { throw VisionStackError.searchFailed("无法构造搜索地址。") }
@@ -993,7 +906,7 @@ actor WebSearchService {
         guard let url = components.url else { throw VisionStackError.searchFailed("搜索地址无效。") }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue("Mozilla/5.0 (Macintosh; VisionStack/0.2)", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PublicHTTPTransport.data(for: request, maximumBytes: 2 * 1_024 * 1_024)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let html = String(data: data, encoding: .utf8) else {
             throw VisionStackError.searchFailed("联网检索失败，请检查网络后重试。")
         }

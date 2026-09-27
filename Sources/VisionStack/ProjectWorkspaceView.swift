@@ -10,8 +10,7 @@ struct ProjectWorkspaceView: View {
     @State private var archiveTarget: CreativeProject?
 
     private var projectJobs: [GenerationJob] { store.allJobs.filter { $0.projectID == store.selectedProjectID } }
-    private var knownCosts: [Decimal] { projectJobs.compactMap { $0.cost?.actualAmount ?? $0.cost?.estimatedAmount } }
-    private var totalKnownCost: Decimal { knownCosts.reduce(Decimal.zero, +) }
+    private var costTotals: [CurrencyCostTotal] { CostPresentation.totals(projectJobs.map(\.cost)) }
     private var unknownCostCount: Int { projectJobs.filter { $0.cost?.actualAmount == nil && $0.cost?.estimatedAmount == nil }.count }
 
     var body: some View {
@@ -65,13 +64,17 @@ struct ProjectWorkspaceView: View {
                             metric("素材", store.currentProjectAssetCount)
                             metric("分镜", store.storyboardShots.filter { $0.projectID == store.selectedProjectID }.count)
                         }
-                        Text("成本台账").font(.vsTitle(19))
+                        Text("费用台账").font(.vsTitle(19))
                         StudioCard {
                             VStack(alignment: .leading, spacing: 10) {
-                                HStack { Text("已知成本"); Spacer(); Text("¥\(NSDecimalNumber(decimal: totalKnownCost).stringValue)").font(.vsLabel(13)) }
-                                HStack { Text("供应商返回或本地估算"); Spacer(); Text("\(knownCosts.count) 项") }
+                                ForEach(costTotals) { total in
+                                    HStack {
+                                        Text(total.currency); Spacer()
+                                        Text("实际 \(CostPresentation.amount(total.actual))（\(total.actualCount) 项） · 预计 \(CostPresentation.amount(total.estimated))（\(total.estimatedCount) 项）")
+                                    }
+                                }
                                 HStack { Text("金额未知"); Spacer(); Text("\(unknownCostCount) 项").foregroundStyle(unknownCostCount == 0 ? VSColor.moss : VSColor.orange) }
-                                Text("未知金额不会按 0 元计入总额；只有供应商明确返回或用户配置估算时才汇总。")
+                                Text("实际、预计分别统计；未知不计为零，各币种独立汇总。")
                                     .font(.vsBody(10)).foregroundStyle(VSColor.muted)
                             }.font(.vsBody(12))
                         }
@@ -103,7 +106,7 @@ struct ProjectWorkspaceView: View {
                                 Image(systemName: job.kind == .image ? "photo" : "film").foregroundStyle(VSColor.vermilion)
                                 Text(job.prompt).lineLimit(1)
                                 Spacer()
-                                Text(job.cost.flatMap { $0.actualAmount ?? $0.estimatedAmount }.map { "¥\(NSDecimalNumber(decimal: $0).stringValue)" } ?? "金额未知")
+                                Text(CostPresentation.label(job.cost))
                                 StatusPill(title: job.state.rawValue, color: job.state == .succeeded ? VSColor.moss : VSColor.orange)
                             }.font(.vsBody(11)).padding(.vertical, 5)
                         }

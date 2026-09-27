@@ -2,12 +2,30 @@ import SwiftUI
 
 struct VideoStudioView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var resolution = "720p"
-    @State private var ratio = "16:9"
-    @State private var duration = 5
-    @State private var batchCount = 1
-    @State private var referenceAssetID: UUID?
-    @State private var selectedShotID: UUID?
+    private var resolution: String {
+        get { store.videoDraft.resolution }
+        nonmutating set { store.videoDraft.resolution = newValue }
+    }
+    private var ratio: String {
+        get { store.videoDraft.ratio }
+        nonmutating set { store.videoDraft.ratio = newValue }
+    }
+    private var duration: Int {
+        get { store.videoDraft.duration }
+        nonmutating set { store.videoDraft.duration = newValue }
+    }
+    private var batchCount: Int {
+        get { store.videoDraft.batchCount }
+        nonmutating set { store.videoDraft.batchCount = newValue }
+    }
+    private var referenceAssetID: UUID? {
+        get { store.videoDraft.referenceAssetID }
+        nonmutating set { store.videoDraft.referenceAssetID = newValue }
+    }
+    private var selectedShotID: UUID? {
+        get { store.videoDraft.selectedShotID }
+        nonmutating set { store.videoDraft.selectedShotID = newValue }
+    }
     @State private var confirming = false
 
     private var profile: CapabilityProfile? { store.profile(for: store.preferredVideoModel) }
@@ -21,7 +39,7 @@ struct VideoStudioView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         Text("MOTION DESK").font(.vsLabel(9)).tracking(2).foregroundStyle(VSColor.vermilion)
-                        Text("让镜头沿着\n+一句话开始运动。")
+                        Text("让镜头沿着\n一句话开始运动。")
                             .font(.vsTitle(30)).foregroundStyle(VSColor.ink)
                         StudioCard {
                             VStack(alignment: .leading, spacing: 13) {
@@ -35,9 +53,9 @@ struct VideoStudioView: View {
                                     CapabilityNote(profile: profile)
                                     MediaAgentSkillPicker(operation: .video)
                                     HStack(spacing: 10) {
-                                        compactPicker("分辨率", selection: $resolution, values: resolutions)
-                                        compactPicker("比例", selection: $ratio, values: ratios)
-                                        VStack(alignment: .leading, spacing: 6) { FieldLabel("时长"); Picker("时长", selection: $duration) { ForEach(durations, id: \.self) { Text("\($0) 秒").tag($0) } }.labelsHidden() }.frame(maxWidth: .infinity)
+                                        compactPicker("分辨率", selection: $store.videoDraft.resolution, values: resolutions)
+                                        compactPicker("比例", selection: $store.videoDraft.ratio, values: ratios)
+                                        VStack(alignment: .leading, spacing: 6) { FieldLabel("时长"); Picker("时长", selection: $store.videoDraft.duration) { ForEach(durations, id: \.self) { Text("\($0) 秒").tag($0) } }.labelsHidden() }.frame(maxWidth: .infinity)
                                     }.disabled(!store.canUseModelService)
                                     CreativePresetPicker(operation: .video) { preset in
                                         let applied = CreativePresetResolver.apply(
@@ -50,11 +68,11 @@ struct VideoStudioView: View {
                                         if let value = applied.parameters["ratio"], ratios.contains(value) { ratio = value }
                                         if let value = applied.parameters["duration"], let seconds = Int(value), durations.contains(seconds) { duration = seconds }
                                     }
-                                    ReferenceAssetPicker(selection: $referenceAssetID, supported: profile?.supportsReferenceImage == true)
+                                    ReferenceAssetPicker(selection: $store.videoDraft.referenceAssetID, supported: profile?.supportsReferenceImage == true)
                                     HStack {
                                         FieldLabel("批量版本")
                                         Spacer()
-                                        Stepper("\(batchCount) 个", value: $batchCount, in: 1...4).frame(width: 120)
+                                        Stepper("\(batchCount) 个", value: $store.videoDraft.batchCount, in: 1...4).frame(width: 120)
                                     }
                                 }
                                 Button { confirming = true } label: { HStack { Image(systemName: "play.rectangle.on.rectangle"); Text(batchCount == 1 ? "创建视频任务" : "创建 \(batchCount) 个版本"); Spacer(); Text("异步 · 可能计费").opacity(0.62) } }
@@ -70,7 +88,7 @@ struct VideoStudioView: View {
                         Button { store.showingRoughCut = true } label: { Label("打开视频草剪台", systemImage: "timeline.selection") }
                             .buttonStyle(.plain).foregroundStyle(VSColor.vermilion)
                     }
-                    StoryboardPanel(selectedShotID: $selectedShotID, prompt: $store.videoPromptDraft, duration: $duration, referenceAssetID: $referenceAssetID)
+                    StoryboardPanel(selectedShotID: $store.videoDraft.selectedShotID, prompt: $store.videoPromptDraft, duration: $store.videoDraft.duration, referenceAssetID: $store.videoDraft.referenceAssetID)
                     Divider()
                     HStack { Text("制作队列").font(.vsTitle(22)); Spacer(); StatusPill(title: "全局 \(store.activeGenerationCount)/\(store.maxConcurrentGenerationTasks) 并发", color: store.canStartGeneration ? VSColor.moss : VSColor.orange) }
                     if store.currentProjectVideoJobs.isEmpty { EmptyStudioState(symbol: "film.stack", title: "还没有镜头任务", detail: "任务 ID、状态和结果会在当前项目中跨应用重启保留。") }
@@ -79,7 +97,7 @@ struct VideoStudioView: View {
                     }
                 }.padding(24)
             }
-            StoryboardTimeline(selectedShotID: $selectedShotID)
+            StoryboardTimeline(selectedShotID: $store.videoDraft.selectedShotID)
         }
         .confirmationDialog("确认创建可能计费的视频任务", isPresented: $confirming, titleVisibility: .visible) {
             Button("使用 \(store.preferredVideoModel) 创建 \(batchCount) 个版本") {

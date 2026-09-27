@@ -2,9 +2,12 @@ import AppKit
 import SwiftUI
 
 struct AssetLibraryView: View {
+    var embedded = false
+    var focusedJobID: UUID? = nil
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @State private var page = 0
     @State private var kindFilter = "全部"
     @State private var favoritesOnly = false
     @State private var selectedIDs: Set<UUID> = []
@@ -26,6 +29,10 @@ struct AssetLibraryView: View {
         }
     }
 
+    private var pageJobs: [GenerationJob] { WorkspacePagination.page(jobs, number: page) }
+    private var resultCount: Int { kindFilter == "参考图" ? filteredReferences.count : jobs.count }
+    private var visibleSelection: Set<UUID> { AssetSelectionPolicy.visibleSelection(selectedIDs, visibleIDs: pageJobs.map(\.id)) }
+
     private var filteredReferences: [ReferenceAsset] {
         let projectAssets = store.referenceAssets.filter { $0.projectID == store.selectedProjectID }
         return query.isEmpty ? projectAssets : projectAssets.filter { $0.name.localizedCaseInsensitiveContains(query) }
@@ -44,7 +51,7 @@ struct AssetLibraryView: View {
                 }
                 Button { Task { await store.runMediaHealthCheck() } } label: { Label("健康检查", systemImage: "stethoscope") }
                 Text("\(kindFilter == "参考图" ? filteredReferences.count : jobs.count) 项").font(.vsLabel(11)).foregroundStyle(VSColor.muted)
-                Button("关闭") { dismiss() }
+                if !embedded { Button("关闭") { dismiss() } }
             }.padding(22)
             Divider()
 
@@ -57,10 +64,12 @@ struct AssetLibraryView: View {
                 if kindFilter == "参考图" {
                     Button { Task { await store.importReferenceImages() } } label: { Label("导入参考图", systemImage: "photo.badge.plus") }
                 } else {
-                    Button("全选") { selectedIDs = Set(jobs.map(\.id)) }.disabled(jobs.isEmpty)
-                    Button("版本对比") { showingComparison = true }.disabled(selectedIDs.count < 2)
-                    Button("导出所选") { exportSelected() }.disabled(selectedIDs.isEmpty)
-                    Button("删除所选", role: .destructive) { confirmingBatchDelete = true }.disabled(selectedIDs.isEmpty)
+                    Button("全选本页") { selectedIDs = Set(pageJobs.map(\.id)) }.disabled(jobs.isEmpty)
+                    Button("取消全选") { selectedIDs.removeAll() }.disabled(visibleSelection.isEmpty)
+                    Text("已选 \(visibleSelection.count) 项").font(.vsBody(10))
+                    Button("版本对比") { showingComparison = true }.disabled(visibleSelection.count < 2)
+                    Button("导出所选") { exportSelected() }.disabled(visibleSelection.isEmpty)
+                    Button("删除所选", role: .destructive) { confirmingBatchDelete = true }.disabled(visibleSelection.isEmpty)
                 }
             }.padding(16)
 
@@ -68,13 +77,13 @@ struct AssetLibraryView: View {
                 if filteredReferences.isEmpty {
                     EmptyStudioState(symbol: "photo.on.rectangle.angled", title: "还没有参考图", detail: "导入图片或把已生成的图片加入参考图库。")
                 } else {
-                    List(filteredReferences) { asset in ReferenceAssetRow(asset: asset) }
+                    List(WorkspacePagination.page(filteredReferences, number: page)) { asset in ReferenceAssetRow(asset: asset) }
                         .scrollContentBackground(.hidden)
                 }
             } else if jobs.isEmpty {
                 EmptyStudioState(symbol: "square.grid.2x2", title: "没有符合条件的素材", detail: "生成结果成功归档后会自动进入素材库。")
             } else {
-                List(jobs) { job in
+                List(pageJobs) { job in
                     AssetRow(
                         job: job,
                         selected: selectedIDs.contains(job.id),
@@ -87,6 +96,7 @@ struct AssetLibraryView: View {
                 .scrollContentBackground(.hidden)
             }
 
+            WorkspacePageControls(page: $page, count: resultCount)
             HStack {
                 Image(systemName: "arrow.up.doc")
                 Text(kindFilter == "参考图" ? "参考图保存在映栈受控目录；被任务、分镜引用或属于已归档项目时会阻止永久删除。" : "批量导出会为每个任务创建目录，并写入提示词、模型、参数、标签、分镜和版本关系。")
@@ -96,21 +106,29 @@ struct AssetLibraryView: View {
                 }
             }.font(.vsBody(11)).foregroundStyle(VSColor.muted).padding(14)
         }
-        .frame(minWidth: 980, minHeight: 700)
+        .frame(minWidth: embedded ? 0 : 980, minHeight: embedded ? 0 : 700)
+        .onChange(of: query) { page = 0; selectedIDs.removeAll() }
+        .onChange(of: favoritesOnly) { page = 0; selectedIDs.removeAll() }
+        .onChange(of: page) { selectedIDs.removeAll() }
+        .onChange(of: resultCount) { page = min(page, WorkspacePagination.lastPage(count: resultCount)) }
+        .onChange(of: pageJobs.map(\.id)) { selectedIDs = visibleSelection }
+        .onChange(of: kindFilter) { page = 0; selectedIDs.removeAll() }
+        .onChange(of: focusedJobID) { revealFocusedAsset() }
+        .onAppear { revealFocusedAsset() }
         .background(PaperBackground())
         .sheet(item: $previewJob) { job in MediaViewerSheet(jobID: job.id, kind: job.kind).environmentObject(store) }
         .sheet(item: $editingJob) { job in AssetMetadataEditor(job: job).environmentObject(store) }
         .sheet(isPresented: $showingComparison) {
-            VersionComparisonView(jobs: store.assetJobs.filter { selectedIDs.contains($0.id) }).environmentObject(store)
+            VersionComparisonView(jobs: store.assetJobs.filter { visibleSelection.contains($0.id) }).environmentObject(store)
         }
         .confirmationDialog("删除所选素材？", isPresented: $confirmingBatchDelete, titleVisibility: .visible) {
             Button("删除任务和本地文件", role: .destructive) {
-                let ids = selectedIDs
+                let ids = visibleSelection
                 selectedIDs.removeAll()
                 Task { await store.deleteJobs(ids) }
             }
             Button("取消", role: .cancel) {}
-        } message: { Text("将删除 \(selectedIDs.count) 项任务及其全部本地归档，此操作无法撤销。") }
+        } message: { Text("将删除 \(visibleSelection.count) 项当前可见任务及其全部本地归档，此操作无法撤销。") }
         .confirmationDialog("修复媒体库？", isPresented: $confirmingRepair, titleVisibility: .visible) {
             Button("清理孤立文件并修正缺失引用", role: .destructive) { Task { await store.repairMediaLibrary() } }
             Button("取消", role: .cancel) {}
@@ -119,8 +137,15 @@ struct AssetLibraryView: View {
         }
     }
 
+    private func revealFocusedAsset() {
+        guard let focusedJobID, let job = store.assetJobs.first(where: { $0.id == focusedJobID && $0.projectID == store.selectedProjectID }) else { return }
+        query = ""; kindFilter = "全部"; favoritesOnly = false
+        if let index = jobs.firstIndex(where: { $0.id == job.id }) { page = index / WorkspacePagination.pageSize }
+        previewJob = job
+    }
+
     private func exportSelected() {
-        do { try MediaFileActions.exportJobs(store.allJobs.filter { selectedIDs.contains($0.id) }) }
+        do { try MediaFileActions.exportJobs(store.allJobs.filter { visibleSelection.contains($0.id) }) }
         catch { store.notice = "批量导出失败：\(error.localizedDescription)" }
     }
 }
@@ -148,7 +173,7 @@ private struct VersionComparisonView: View {
                                 FieldLabel("提示词"); Text(job.prompt).font(.vsBody(11)).lineLimit(8).textSelection(.enabled)
                                 FieldLabel("模型"); Text(job.model).font(.vsBody(10)).textSelection(.enabled)
                                 FieldLabel("参数"); Text(job.parameters.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
-                                FieldLabel("成本"); Text(job.cost.flatMap { $0.actualAmount ?? $0.estimatedAmount }.map { "¥\(NSDecimalNumber(decimal: $0).stringValue)" } ?? "金额未知").font(.vsBody(11))
+                                FieldLabel("成本"); Text(CostPresentation.label(job.cost)).font(.vsBody(11))
                                 FieldLabel("评分与评语")
                                 Picker("评分", selection: Binding(
                                     get: { store.versionReview(for: job.id)?.score ?? 3 },
@@ -240,9 +265,10 @@ private struct AssetRow: View {
             Text("\(MediaFileActions.previewURLs(for: job).count) 个结果").font(.vsBody(11)).foregroundStyle(VSColor.muted)
             Button(action: onFavorite) { Image(systemName: job.favorite == true ? "star.fill" : "star") }.buttonStyle(.plain).foregroundStyle(VSColor.orange)
             Button("编辑", action: onEdit).buttonStyle(.plain).foregroundStyle(VSColor.vermilion)
-            Button("查看", action: onPreview).buttonStyle(.plain).foregroundStyle(VSColor.vermilion)
+            Button("查看", action: onPreview).buttonStyle(.borderless).accessibilityLabel("查看素材：\(job.prompt)").foregroundStyle(VSColor.vermilion)
         }
         .padding(.vertical, 7)
+        .accessibilityElement(children: .contain)
     }
 }
 

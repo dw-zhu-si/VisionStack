@@ -106,7 +106,10 @@ public static class ProviderEndpointPolicy
                 100 when octets[1] is >= 64 and <= 127 => true,
                 169 when octets[1] == 254 => true,
                 172 when octets[1] is >= 16 and <= 31 => true,
-                192 when octets[1] == 168 => true,
+                192 when octets[1] == 168 || octets[1] == 0 => true,
+                192 when octets[1] == 2 => true,
+                198 when octets[1] == 51 && octets[2] == 100 => true,
+                203 when octets[1] == 0 && octets[2] == 113 => true,
                 198 when octets[1] is 18 or 19 => true,
                 >= 224 => true,
                 _ => false
@@ -119,7 +122,10 @@ public static class ProviderEndpointPolicy
                address.IsIPv6LinkLocal ||
                address.IsIPv6Multicast ||
                address.IsIPv6SiteLocal ||
-               (bytes[0] & 0xFE) == 0xFC;
+               (bytes[0] & 0xFE) == 0xFC ||
+               (bytes[0] & 0xE0) != 0x20 ||
+               (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8) ||
+               (bytes[0] == 0x20 && bytes[1] == 0x02);
     }
 
     private static bool ContainsParentDirectorySegment(string rawUrl)

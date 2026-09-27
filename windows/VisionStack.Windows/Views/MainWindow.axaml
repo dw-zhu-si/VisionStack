@@ -30,25 +30,25 @@
           <Border Padding="13,12" Background="#34312D" CornerRadius="10">
             <StackPanel>
               <TextBlock Text="对话" FontSize="15" FontWeight="SemiBold" Foreground="#C9C2B8" />
-              <TextBlock Text="后续阶段" FontSize="11" Foreground="#8E877D" />
+              <TextBlock Text="通过工作区使用" FontSize="11" Foreground="#8E877D" />
             </StackPanel>
           </Border>
           <Border Padding="13,12" Background="#34312D" CornerRadius="10">
             <StackPanel>
               <TextBlock Text="生图" FontSize="15" FontWeight="SemiBold" Foreground="#C9C2B8" />
-              <TextBlock Text="后续阶段" FontSize="11" Foreground="#8E877D" />
+              <TextBlock Text="通过工作区使用" FontSize="11" Foreground="#8E877D" />
             </StackPanel>
           </Border>
           <Border Padding="13,12" Background="#34312D" CornerRadius="10">
             <StackPanel>
               <TextBlock Text="视频" FontSize="15" FontWeight="SemiBold" Foreground="#C9C2B8" />
-              <TextBlock Text="后续阶段" FontSize="11" Foreground="#8E877D" />
+              <TextBlock Text="暂不支持" FontSize="11" Foreground="#8E877D" />
             </StackPanel>
           </Border>
           <Border Padding="13,12" Background="#E83A20" CornerRadius="10">
             <StackPanel>
               <TextBlock Text="模型与厂商" FontSize="15" FontWeight="SemiBold" Foreground="#FFFFFF" />
-              <TextBlock Text="第一阶段已启用" FontSize="11" Foreground="#FFE6DF" />
+              <TextBlock Text="连接与模型目录" FontSize="11" Foreground="#FFE6DF" />
             </StackPanel>
           </Border>
         </StackPanel>
@@ -79,8 +79,8 @@
       <Grid ColumnDefinitions="*,430" Margin="30,28,30,34">
         <StackPanel Margin="0,0,24,0" Spacing="20">
           <StackPanel Spacing="8">
-            <TextBlock Text="先把模型入口接稳，" FontSize="34" FontWeight="Bold" />
-            <TextBlock Text="再让创作流程落地。" FontSize="34" FontWeight="Bold" />
+            <TextBlock Text="项目、对话与图片，" FontSize="34" FontWeight="Bold" />
+            <TextBlock Text="在一个工作区完成。" FontSize="34" FontWeight="Bold" />
             <TextBlock Text="本阶段不会自动联网、不会自动计费，也不会把供应商密钥写入普通配置或日志。"
                        Margin="0,6,0,0" FontSize="13" Foreground="#655F56" TextWrapping="Wrap" />
           </StackPanel>
@@ -132,8 +132,8 @@
                         <TextBlock Text="{Binding KindTitle}" HorizontalAlignment="Right" FontSize="11" FontWeight="SemiBold" Foreground="#E83A20" />
                         <TextBlock Text="{Binding ModelsSummary}" HorizontalAlignment="Right" FontSize="10" Foreground="#655F56" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6" Margin="0,5,0,0">
-                          <Button Classes="secondary" Content="设为当前" MinHeight="30" Padding="9,4"
-                                  IsVisible="{Binding !IsSelected}" Command="{Binding SelectCommand}" CommandParameter="{Binding Id}" />
+                          <Button Classes="secondary" Content="选择 / 编辑" MinHeight="30" Padding="9,4"
+                                  Command="{Binding SelectCommand}" CommandParameter="{Binding Id}" />
                           <Button Classes="secondary" Content="删除" MinHeight="30" Padding="9,4"
                                   IsVisible="{Binding CanDelete}" Command="{Binding DeleteCommand}" CommandParameter="{Binding Id}" />
                         </StackPanel>
@@ -144,6 +144,30 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </StackPanel>
+
+          <Border Padding="18" Background="#FFFDF8" CornerRadius="12">
+            <StackPanel Spacing="10">
+              <TextBlock Text="创作工作区" FontSize="21" FontWeight="SemiBold" />
+              <ComboBox ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject}" IsEnabled="{Binding !IsBusy}" />
+              <TextBox Text="{Binding ProjectName}" PlaceholderText="新项目名称" />
+              <Button Content="新建项目" Command="{Binding NewProjectCommand}" IsEnabled="{Binding !IsBusy}" />
+              <CheckBox Content="同意本次向当前厂商发送数据（提示词及对话历史）" IsChecked="{Binding ConsentToProvider}" />
+              <Button Content="连接测试 / 读取模型目录" Command="{Binding TestConnectionCommand}" IsEnabled="{Binding !IsBusy}" />
+              <ComboBox ItemsSource="{Binding Models}" SelectedItem="{Binding ModelId}" IsEnabled="{Binding !IsBusy}" />
+              <TextBox Text="{Binding ModelId}" PlaceholderText="模型 ID，可手工输入" IsEnabled="{Binding !IsBusy}" />
+              <TextBox Text="{Binding Prompt}" AcceptsReturn="True" MinHeight="100" TextWrapping="Wrap" PlaceholderText="提示词 / 项目草稿" IsEnabled="{Binding !IsBusy}" />
+              <Button Content="保存草稿" Command="{Binding SaveDraftCommand}" />
+              <CheckBox Content="确认本次生成可能计费，实际费用以厂商账单为准" IsChecked="{Binding ConsentToCharge}" />
+              <WrapPanel>
+                <Button Content="发送对话" Command="{Binding SendChatCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,0,8,8" />
+                <Button Content="生成图片" Command="{Binding GenerateImageCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,0,8,8" />
+                <Button Content="停止" Command="{Binding CancelOperationCommand}" IsEnabled="{Binding IsBusy}" />
+              </WrapPanel>
+              <TextBox Text="{Binding WorkspaceSummary}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="160" MaxHeight="400" />
+              <TextBox Text="{Binding ExportDirectory}" PlaceholderText="已存在的导出文件夹路径" />
+              <Button Content="导出当前项目与图片（新建独立目录）" Command="{Binding ExportProjectCommand}" IsEnabled="{Binding !IsBusy}" />
+            </StackPanel>
+          </Border>
 
           <Border Padding="16" Background="#EEE7D9" CornerRadius="12">
             <StackPanel Spacing="5">
@@ -157,10 +181,11 @@
         <Border Grid.Column="1" Padding="22" Background="#FFFDF8" BorderBrush="#D9D0C1" BorderThickness="1" CornerRadius="16" VerticalAlignment="Top">
           <StackPanel Spacing="13">
             <StackPanel Spacing="4">
-              <TextBlock Text="添加模型厂商" FontSize="21" FontWeight="SemiBold" />
+              <TextBlock Text="添加 / 编辑模型厂商" FontSize="21" FontWeight="SemiBold" />
               <TextBlock Text="保存只处理本机配置；连接测试与模型调用将单独征得确认。" FontSize="11" Foreground="#655F56" TextWrapping="Wrap" />
             </StackPanel>
 
+            <Button Content="开始新增厂商" Command="{Binding NewProviderCommand}" IsEnabled="{Binding !IsBusy}" />
             <TextBlock Text="厂商类型" FontSize="11" FontWeight="SemiBold" />
             <ComboBox ItemsSource="{Binding ProviderKinds}" SelectedItem="{Binding SelectedProviderKind}">
               <ComboBox.ItemTemplate>
@@ -179,6 +204,7 @@
             <TextBlock Text="API 密钥（可留空）" FontSize="11" FontWeight="SemiBold" />
             <TextBox Text="{Binding Secret}" PasswordChar="●" RevealPassword="False" PlaceholderText="仅写入 Windows DPAPI" />
 
+            <CheckBox Content="清除已保存密钥（留空默认保留原密钥）" IsChecked="{Binding ClearStoredSecret}" />
             <TextBlock Text="手动模型 ID（可选）" FontSize="11" FontWeight="SemiBold" />
             <TextBox Text="{Binding ManualModelIds}" AcceptsReturn="True" MinHeight="78" TextWrapping="Wrap" PlaceholderText="每行或逗号分隔；连接目录不完整时使用" />
 
@@ -197,7 +223,7 @@
               <Button Grid.Column="1" Margin="6,0,0,0" Classes="primary" Content="校验并保存" Command="{Binding SaveCommand}" IsEnabled="{Binding !IsBusy}" />
             </Grid>
 
-            <TextBlock Text="Beta 限制：目前尚未实现真实连接测试、模型目录同步、创作调用和自动更新。"
+            <TextBlock Text="Beta 限制：暂不支持视频、参考图、流式对话、远端任务恢复及自动更新。真实 Windows 验收待完成。"
                        FontSize="10" Foreground="#8D4A3A" TextWrapping="Wrap" />
           </StackPanel>
         </Border>
